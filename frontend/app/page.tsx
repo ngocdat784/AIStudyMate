@@ -1,101 +1,65 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
+
+type Flashcard = {
+  question: string;
+  answer: string;
+};
+
+type QuizQuestion = {
+  question: string;
+  options: string[];
+  correct_answer: string;
+  explanation: string;
+};
+
+type StudyResult = {
+  title: string;
+  summary: string;
+  key_points: string[];
+  flashcards: Flashcard[];
+  quiz: QuizQuestion[];
+  study_plan: string[];
+};
 
 export default function Home() {
-  const [image, setImage] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
-
-  const [searchPrompt, setSearchPrompt] = useState("");
-  const [prompt, setPrompt] = useState("");
+  const [content, setContent] = useState("");
+  const [result, setResult] = useState<StudyResult | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
-      }
-
-      if (resultUrl) {
-        URL.revokeObjectURL(resultUrl);
-      }
-    };
-  }, [previewUrl, resultUrl]);
-
-  const handleImageChange = (
-    event: ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    if (!file.type.startsWith("image/")) {
-      setError("Vui lòng chọn một file ảnh.");
-      return;
-    }
-
-    setImage(file);
-    setError("");
-
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-    }
-
-    const newPreviewUrl = URL.createObjectURL(file);
-    setPreviewUrl(newPreviewUrl);
-
-    if (resultUrl) {
-      URL.revokeObjectURL(resultUrl);
-      setResultUrl(null);
-    }
-  };
 
   const handleSubmit = async (
     event: FormEvent<HTMLFormElement>
   ) => {
     event.preventDefault();
 
-    if (!image) {
-      setError("Vui lòng chọn ảnh trước.");
-      return;
-    }
-
-    if (!searchPrompt.trim()) {
-      setError("Vui lòng nhập đối tượng cần chỉnh sửa.");
-      return;
-    }
-
-    if (!prompt.trim()) {
-      setError("Vui lòng nhập yêu cầu chỉnh sửa.");
+    if (!content.trim()) {
+      setError("Vui lòng nhập nội dung bài học.");
       return;
     }
 
     setLoading(true);
     setError("");
-    setResultUrl(null);
+    setResult(null);
 
     try {
-      const formData = new FormData();
-
-      formData.append("image", image);
-      formData.append("search_prompt", searchPrompt);
-      formData.append("prompt", prompt);
-
       const response = await fetch(
-        "http://127.0.0.1:8000/api/images/edit",
+        "http://127.0.0.1:8000/api/study/generate",
         {
           method: "POST",
-          body: formData,
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            content: content.trim(),
+          }),
         }
       );
 
       if (!response.ok) {
-        let message = "Không thể chỉnh sửa ảnh.";
+        let message = "Không thể tạo tài liệu học tập.";
 
         try {
           const data = await response.json();
@@ -104,16 +68,24 @@ export default function Home() {
             message = data.detail;
           }
         } catch {
-          // Response không phải JSON
+          // Ignore JSON parsing errors.
         }
 
         throw new Error(message);
       }
 
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
+      const data: StudyResult = await response.json();
 
-      setResultUrl(url);
+      setResult(data);
+
+      setTimeout(() => {
+        document
+          .getElementById("study-result")
+          ?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+      }, 100);
     } catch (error) {
       console.error(error);
 
@@ -127,208 +99,634 @@ export default function Home() {
     }
   };
 
-  const handleDownload = () => {
-    if (!resultUrl) {
-      return;
-    }
-
-    const link = document.createElement("a");
-
-    link.href = resultUrl;
-    link.download = "aipicture-result.png";
-
-    link.click();
+  const handleClear = () => {
+    setContent("");
+    setResult(null);
+    setError("");
   };
 
   return (
-    <main className="page">
+    <main className="app">
+
+      <div className="background-glow background-glow-one" />
+      <div className="background-glow background-glow-two" />
+
       <div className="container">
 
-        <header className="header">
-          <h1>AIPicture</h1>
+        {/* Header */}
 
-          <p>
-            AI Image Editing
-          </p>
+        <header className="topbar">
+
+          <div className="brand">
+            <div className="brand-mark">
+              SM
+            </div>
+
+            <div>
+              <h1>StudyMate</h1>
+              <span>AI Learning Assistant</span>
+            </div>
+          </div>
+
+          <div className="status">
+            <span className="status-dot" />
+            Gemini AI
+          </div>
+
         </header>
 
 
-        <section className="editor">
+        {/* Hero */}
 
-          {/* LEFT - UPLOAD */}
+        <section className="hero">
 
-          <div className="upload-section">
+          <div className="hero-badge">
+            AI-powered learning
+          </div>
 
-            <label
-              htmlFor="image-upload"
-              className="upload-box"
-            >
+          <h2>
+            Turn your study material
+            <br />
+            into a <span>smarter study plan.</span>
+          </h2>
 
-              {previewUrl ? (
+          <p>
+            Paste your lesson, notes or study material.
+            StudyMate will transform it into summaries,
+            key points, flashcards and quizzes.
+          </p>
 
-                <img
-                  src={previewUrl}
-                  alt="Ảnh đã chọn"
-                  className="preview-image"
-                />
-
-              ) : (
-
-                <div className="upload-placeholder">
-
-                  <div className="upload-icon">
-                    +
-                  </div>
-
-                  <h2>
-                    Chọn ảnh
-                  </h2>
-
-                  <p>
-                    JPG, PNG hoặc WebP
-                  </p>
-
-                </div>
-
-              )}
-
-            </label>
+        </section>
 
 
-            <input
-              id="image-upload"
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              onChange={handleImageChange}
-              hidden
-            />
+        {/* Input */}
+
+        <section className="input-card">
+
+          <div className="section-heading">
+
+            <div>
+              <span className="section-number">
+                01
+              </span>
+
+              <div>
+                <h3>Your study material</h3>
+
+                <p>
+                  Paste the content you want to learn.
+                </p>
+              </div>
+            </div>
+
+            {content && (
+              <button
+                type="button"
+                className="clear-button"
+                onClick={handleClear}
+              >
+                Clear
+              </button>
+            )}
 
           </div>
 
 
-          {/* RIGHT - CONTROLS */}
+          <form onSubmit={handleSubmit}>
 
-          <form
-            onSubmit={handleSubmit}
-            className="control-section"
-          >
-
-            {/* SEARCH PROMPT */}
-
-            <div className="field">
-
-              <label htmlFor="search-prompt">
-                Đối tượng cần chỉnh sửa
-              </label>
-
-              <input
-                id="search-prompt"
-                type="text"
-                value={searchPrompt}
-                onChange={(event) =>
-                  setSearchPrompt(event.target.value)
-                }
-                placeholder="Ví dụ: car, person, tree, chair..."
-              />
-
-              <p className="field-hint">
-                Nhập đối tượng hoặc khu vực bạn muốn thay đổi
-              </p>
-
-            </div>
-
-
-            {/* PROMPT */}
-
-            <div className="field">
-
-              <label htmlFor="prompt">
-                Bạn muốn chỉnh sửa gì?
-              </label>
+            <div className="textarea-wrapper">
 
               <textarea
-                id="prompt"
-                value={prompt}
+                value={content}
                 onChange={(event) =>
-                  setPrompt(event.target.value)
+                  setContent(event.target.value)
                 }
-                placeholder="Ví dụ: Change the car color to blue..."
-                rows={7}
+                placeholder={
+                  "Paste your lesson, lecture notes, textbook content...\n\nVí dụ:\nTCP là một giao thức hướng kết nối trong bộ giao thức TCP/IP..."
+                }
+                rows={12}
               />
+
+              <div className="character-count">
+                {content.length.toLocaleString()} characters
+              </div>
 
             </div>
 
 
             {error && (
-              <div className="error">
-                {error}
+              <div className="error-box">
+                <strong>Error</strong>
+                <span>{error}</span>
               </div>
             )}
 
 
-            <button
-              type="submit"
-              className="generate-button"
-              disabled={loading}
-            >
+            <div className="form-footer">
 
-              {loading
-                ? "Đang chỉnh sửa..."
-                : "Chỉnh sửa ảnh"}
+              <div className="input-hint">
+                <span>AI</span>
+                Summary · Flashcards · Quiz · Study Plan
+              </div>
 
-            </button>
+              <button
+                type="submit"
+                className="generate-button"
+                disabled={loading}
+              >
+                {loading ? (
+                  <>
+                    <span className="spinner" />
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    Generate
+                    <span className="arrow">
+                      →
+                    </span>
+                  </>
+                )}
+              </button>
+
+            </div>
 
           </form>
 
         </section>
 
 
-        {/* RESULT */}
+        {/* Loading */}
 
-        {resultUrl && (
+        {loading && (
+          <section className="loading-card">
 
-          <section className="result-section">
+            <div className="loading-animation">
+              <span />
+              <span />
+              <span />
+            </div>
+
+            <h3>
+              StudyMate is analyzing your material
+            </h3>
+
+            <p>
+              Creating your personalized study content...
+            </p>
+
+          </section>
+        )}
+
+
+        {/* Result */}
+
+        {result && !loading && (
+          <section
+            id="study-result"
+            className="result-section"
+          >
+
+            {/* Result header */}
 
             <div className="result-header">
 
               <div>
 
-                <h2>
-                  Kết quả
-                </h2>
+                <div className="result-label">
+                  GENERATED STUDY MATERIAL
+                </div>
+
+                <h2>{result.title}</h2>
 
                 <p>
-                  Ảnh được tạo bởi Stability AI
+                  Your learning material has been
+                  generated by StudyMate.
                 </p>
 
               </div>
 
+              <div className="result-count">
+                <strong>
+                  {result.quiz.length}
+                </strong>
+
+                <span>
+                  quiz questions
+                </span>
+              </div>
+
+            </div>
+
+
+            {/* Summary */}
+
+            <section className="result-card summary-card">
+
+              <div className="card-title">
+
+                <div className="card-icon">
+                  S
+                </div>
+
+                <div>
+                  <span>01</span>
+                  <h3>Summary</h3>
+                </div>
+
+              </div>
+
+              <p className="summary-text">
+                {result.summary}
+              </p>
+
+            </section>
+
+
+            {/* Key points */}
+
+            <section className="result-card">
+
+              <div className="card-title">
+
+                <div className="card-icon">
+                  K
+                </div>
+
+                <div>
+                  <span>02</span>
+                  <h3>Key Points</h3>
+                </div>
+
+              </div>
+
+              <div className="key-points">
+
+                {result.key_points.map(
+                  (point, index) => (
+                    <div
+                      className="key-point"
+                      key={index}
+                    >
+
+                      <span className="point-number">
+                        {String(index + 1).padStart(
+                          2,
+                          "0"
+                        )}
+                      </span>
+
+                      <p>{point}</p>
+
+                    </div>
+                  )
+                )}
+
+              </div>
+
+            </section>
+
+
+            {/* Flashcards */}
+
+            <section className="result-card">
+
+              <div className="card-title">
+
+                <div className="card-icon">
+                  F
+                </div>
+
+                <div>
+                  <span>03</span>
+                  <h3>Flashcards</h3>
+                </div>
+
+              </div>
+
+              <p className="card-description">
+                Click a card to reveal the answer.
+              </p>
+
+              <div className="flashcard-grid">
+
+                {result.flashcards.map(
+                  (card, index) => (
+                    <Flashcard
+                      key={index}
+                      card={card}
+                      index={index}
+                    />
+                  )
+                )}
+
+              </div>
+
+            </section>
+
+
+            {/* Quiz */}
+
+            <section className="result-card">
+
+              <div className="card-title">
+
+                <div className="card-icon">
+                  Q
+                </div>
+
+                <div>
+                  <span>04</span>
+                  <h3>Quiz</h3>
+                </div>
+
+              </div>
+
+              <p className="card-description">
+                Test your understanding.
+              </p>
+
+              <div className="quiz-list">
+
+                {result.quiz.map(
+                  (quiz, index) => (
+                    <QuizCard
+                      key={index}
+                      quiz={quiz}
+                      index={index}
+                    />
+                  )
+                )}
+
+              </div>
+
+            </section>
+
+
+            {/* Study plan */}
+
+            <section className="result-card">
+
+              <div className="card-title">
+
+                <div className="card-icon">
+                  P
+                </div>
+
+                <div>
+                  <span>05</span>
+                  <h3>Study Plan</h3>
+                </div>
+
+              </div>
+
+              <div className="study-plan">
+
+                {result.study_plan.map(
+                  (step, index) => (
+                    <div
+                      className="plan-step"
+                      key={index}
+                    >
+
+                      <div className="plan-number">
+                        {index + 1}
+                      </div>
+
+                      <p>{step}</p>
+
+                    </div>
+                  )
+                )}
+
+              </div>
+
+            </section>
+
+
+            {/* Bottom */}
+
+            <div className="result-footer">
+
+              <p>
+                Generated with AI StudyMate
+              </p>
 
               <button
-                onClick={handleDownload}
-                className="download-button"
+                type="button"
+                onClick={() =>
+                  window.scrollTo({
+                    top: 0,
+                    behavior: "smooth",
+                  })
+                }
               >
-                Tải ảnh xuống
+                Create another study set ↑
               </button>
 
             </div>
 
-
-            <div className="result-image-container">
-
-              <img
-                src={resultUrl}
-                alt="Ảnh kết quả"
-                className="result-image"
-              />
-
-            </div>
-
           </section>
-
         )}
 
       </div>
     </main>
+  );
+}
+
+
+/* -------------------------------- */
+/* Flashcard */
+/* -------------------------------- */
+
+function Flashcard({
+  card,
+  index,
+}: {
+  card: Flashcard;
+  index: number;
+}) {
+  const [showAnswer, setShowAnswer] =
+    useState(false);
+
+  return (
+    <button
+      type="button"
+      className={`flashcard ${
+        showAnswer ? "flashcard-active" : ""
+      }`}
+      onClick={() =>
+        setShowAnswer((current) => !current)
+      }
+    >
+
+      <div className="flashcard-top">
+
+        <span>
+          CARD {String(index + 1).padStart(2, "0")}
+        </span>
+
+        <span className="flip-label">
+          {showAnswer
+            ? "QUESTION"
+            : "REVEAL"}
+        </span>
+
+      </div>
+
+      <div className="flashcard-content">
+
+        {showAnswer ? (
+          <>
+            <small>ANSWER</small>
+
+            <p>
+              {card.answer}
+            </p>
+          </>
+        ) : (
+          <>
+            <small>QUESTION</small>
+
+            <h4>
+              {card.question}
+            </h4>
+          </>
+        )}
+
+      </div>
+
+      <div className="flashcard-bottom">
+        {showAnswer
+          ? "Click to see question"
+          : "Click to reveal answer"}
+      </div>
+
+    </button>
+  );
+}
+
+
+/* -------------------------------- */
+/* Quiz */
+/* -------------------------------- */
+
+function QuizCard({
+  quiz,
+  index,
+}: {
+  quiz: QuizQuestion;
+  index: number;
+}) {
+  const [selected, setSelected] =
+    useState<string | null>(null);
+
+  const answered = selected !== null;
+
+  const isCorrect =
+    selected === quiz.correct_answer;
+
+  return (
+    <div className="quiz-item">
+
+      <div className="quiz-question">
+
+        <span className="quiz-number">
+          {String(index + 1).padStart(2, "0")}
+        </span>
+
+        <h4>{quiz.question}</h4>
+
+      </div>
+
+
+      <div className="quiz-options">
+
+        {quiz.options.map(
+          (option, optionIndex) => {
+
+            const isSelected =
+              selected === option;
+
+            const isCorrectAnswer =
+              option === quiz.correct_answer;
+
+            let className = "quiz-option";
+
+            if (answered && isCorrectAnswer) {
+              className += " correct";
+            }
+
+            if (
+              answered &&
+              isSelected &&
+              !isCorrectAnswer
+            ) {
+              className += " incorrect";
+            }
+
+            return (
+              <button
+                type="button"
+                key={option}
+                className={className}
+                disabled={answered}
+                onClick={() =>
+                  setSelected(option)
+                }
+              >
+
+                <span className="option-letter">
+                  {String.fromCharCode(
+                    65 + optionIndex
+                  )}
+                </span>
+
+                <span>
+                  {option}
+                </span>
+
+              </button>
+            );
+          }
+        )}
+
+      </div>
+
+
+      {answered && (
+        <div
+          className={`quiz-feedback ${
+            isCorrect
+              ? "feedback-correct"
+              : "feedback-incorrect"
+          }`}
+        >
+
+          <div className="feedback-title">
+
+            <strong>
+              {isCorrect
+                ? "Correct"
+                : "Not quite"}
+            </strong>
+
+            {!isCorrect && (
+              <span>
+                Correct answer:{" "}
+                {quiz.correct_answer}
+              </span>
+            )}
+
+          </div>
+
+          <p>
+            {quiz.explanation}
+          </p>
+
+        </div>
+      )}
+
+    </div>
   );
 }
