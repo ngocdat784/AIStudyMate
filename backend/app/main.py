@@ -1,12 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes.image import router as image_router
+from app.routes.study import router as study_router
 
 
 app = FastAPI(
-    title="AIPicture API",
-    description="AI Image Editing API powered by Stability AI",
+    title="AI StudyMate API",
+    description="AI-powered study assistant",
     version="1.0.0",
 )
 
@@ -15,6 +15,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -22,18 +23,11 @@ app.add_middleware(
 )
 
 
-app.include_router(image_router)
+app.include_router(study_router)
 
 
 @app.get("/")
-async def root():
+def root():
     return {
-        "message": "AIPicture API is running"
-    }
-
-
-@app.get("/health")
-async def health():
-    return {
-        "status": "ok"
+        "message": "AI StudyMate API is running"
     }
