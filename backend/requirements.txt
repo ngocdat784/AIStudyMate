@@ -2,6 +2,9 @@ fastapi
 uvicorn[standard]
 python-multipart
 python-dotenv
-pydantic
 pydantic-settings
+pillow
+requests
 google-genai
+pypdf
+python-docx

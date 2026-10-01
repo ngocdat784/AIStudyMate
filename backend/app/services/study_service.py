@@ -1,5 +1,3 @@
-from typing import List
-
 from google import genai
 from pydantic import BaseModel, Field
 
@@ -10,52 +8,40 @@ GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 
 class Flashcard(BaseModel):
-    question: str = Field(
-        description="A question that tests an important concept from the study material."
-    )
-    answer: str = Field(
-        description="A concise and accurate answer to the question."
-    )
+    question: str
+    answer: str
 
 
 class QuizQuestion(BaseModel):
-    question: str = Field(
-        description="A multiple-choice question based only on the study material."
-    )
-    options: List[str] = Field(
-        description="Exactly four answer options."
-    )
-    correct_answer: str = Field(
-        description="The correct answer, matching exactly one of the options."
-    )
-    explanation: str = Field(
-        description="A short explanation of why the answer is correct."
-    )
+    question: str
+    options: list[str]
+    correct_answer: str
+    explanation: str
 
 
-class StudyResult(BaseModel):
-    title: str = Field(
-        description="A suitable title for the study material."
+class StudyMaterial(BaseModel):
+    title: str
+
+    summary: str
+
+    key_points: list[str] = Field(
+        min_length=3,
+        max_length=8,
     )
 
-    summary: str = Field(
-        description="A clear summary of the study material in Vietnamese."
+    flashcards: list[Flashcard] = Field(
+        min_length=4,
+        max_length=10,
     )
 
-    key_points: List[str] = Field(
-        description="The most important points the student should remember."
+    quiz: list[QuizQuestion] = Field(
+        min_length=5,
+        max_length=10,
     )
 
-    flashcards: List[Flashcard] = Field(
-        description="Useful flashcards generated from the study material."
-    )
-
-    quiz: List[QuizQuestion] = Field(
-        description="Multiple-choice questions for self-testing."
-    )
-
-    study_plan: List[str] = Field(
-        description="A short step-by-step study plan for this material."
+    study_plan: list[str] = Field(
+        min_length=3,
+        max_length=7,
     )
 
 
@@ -65,53 +51,54 @@ client = genai.Client(
 
 
 SYSTEM_INSTRUCTION = """
-You are an AI study assistant called StudyMate.
+You are StudyMate, an expert AI learning assistant.
 
-Your job is to transform study material into useful learning content.
+Your job is to transform educational material into
+useful study material for students.
 
-The user may provide:
-- lecture notes
-- textbook content
-- technical documentation
-- programming notes
-- exam preparation material
-- copied text from a document
+The input may be Vietnamese or English.
 
-Your tasks:
+You must return structured JSON containing:
 
-1. Understand the material accurately.
-2. Create a concise summary in Vietnamese.
-3. Extract the most important concepts.
-4. Create useful flashcards.
-5. Create multiple-choice quiz questions.
-6. Create a practical study plan.
+1. title
+2. summary
+3. key_points
+4. flashcards
+5. quiz
+6. study_plan
 
 Rules:
 
-- Use only information contained in the provided study material.
-- Do not invent facts that are not supported by the material.
-- Keep explanations clear and suitable for students.
-- Use Vietnamese unless the source material clearly requires another language.
-- Flashcards should test important concepts rather than trivial details.
-- Quiz questions must have exactly four options.
-- The correct answer must exactly match one of the four options.
-- Do not make every question extremely easy.
-- The study plan should progress from understanding to memorization and practice.
-- Return only structured JSON matching the requested schema.
+- Preserve the factual meaning of the source material.
+- Do not invent information that is not supported by the material.
+- Use clear and natural Vietnamese when the source is Vietnamese.
+- Make the summary concise but informative.
+- Extract the most important concepts as key points.
+- Create useful flashcards that test understanding.
+- Create multiple-choice questions based only on the material.
+- Every quiz question must have exactly 4 options.
+- correct_answer must exactly match one of the options.
+- Explanation must explain why the answer is correct.
+- Create a practical study plan based on the material.
+- Avoid repeating the exact same question.
+- Make the questions useful for actual studying.
+- Do not include markdown.
+- Return only structured JSON.
 """
 
 
 def generate_study_material(
     content: str,
-) -> StudyResult:
-
-    if not content.strip():
-        raise ValueError("Study material cannot be empty.")
+) -> StudyMaterial:
 
     user_input = f"""
-Study material:
+Here is the study material:
 
+--------------------
 {content}
+--------------------
+
+Create a complete study set from this material.
 """
 
     interaction = client.interactions.create(
@@ -120,20 +107,21 @@ Study material:
         response_format={
             "type": "text",
             "mime_type": "application/json",
-            "schema": StudyResult.model_json_schema(),
+            "schema": StudyMaterial.model_json_schema(),
         },
     )
 
     if not interaction.output_text:
         raise Exception(
-            "Gemini did not return study material."
+            "Gemini không trả về nội dung học tập."
         )
 
     try:
-        return StudyResult.model_validate_json(
+        return StudyMaterial.model_validate_json(
             interaction.output_text
         )
+
     except Exception as e:
         raise Exception(
-            f"Invalid Gemini response: {str(e)}"
+            f"Gemini trả về dữ liệu không hợp lệ: {str(e)}"
         )

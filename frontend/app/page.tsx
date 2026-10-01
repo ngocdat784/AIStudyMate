@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useState } from "react";
 
 type Flashcard = {
   question: string;
@@ -25,18 +25,84 @@ type StudyResult = {
 
 export default function Home() {
   const [content, setContent] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
   const [result, setResult] = useState<StudyResult | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // --------------------------------
+  // File upload
+  // --------------------------------
+
+  const handleFileChange = (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    const allowedExtensions = [
+      ".pdf",
+      ".docx",
+      ".txt",
+    ];
+
+    const extension =
+      "." + file.name.split(".").pop()?.toLowerCase();
+
+    if (!allowedExtensions.includes(extension)) {
+      setError(
+        "Chỉ hỗ trợ file PDF, DOCX hoặc TXT."
+      );
+
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setError("File không được vượt quá 10MB.");
+
+      event.target.value = "";
+      return;
+    }
+
+    setSelectedFile(file);
+    setError("");
+  };
+
+  // --------------------------------
+  // Remove selected file
+  // --------------------------------
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+
+    const input = document.getElementById(
+      "study-file"
+    ) as HTMLInputElement | null;
+
+    if (input) {
+      input.value = "";
+    }
+  };
+
+  // --------------------------------
+  // Generate study material
+  // --------------------------------
 
   const handleSubmit = async (
     event: FormEvent<HTMLFormElement>
   ) => {
     event.preventDefault();
 
-    if (!content.trim()) {
-      setError("Vui lòng nhập nội dung bài học.");
+    if (!content.trim() && !selectedFile) {
+      setError(
+        "Vui lòng nhập nội dung hoặc upload tài liệu."
+      );
       return;
     }
 
@@ -45,21 +111,33 @@ export default function Home() {
     setResult(null);
 
     try {
+      const formData = new FormData();
+
+      if (content.trim()) {
+        formData.append(
+          "content",
+          content.trim()
+        );
+      }
+
+      if (selectedFile) {
+        formData.append(
+          "file",
+          selectedFile
+        );
+      }
+
       const response = await fetch(
         "http://127.0.0.1:8000/api/study/generate",
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            content: content.trim(),
-          }),
+          body: formData,
         }
       );
 
       if (!response.ok) {
-        let message = "Không thể tạo tài liệu học tập.";
+        let message =
+          "Không thể tạo tài liệu học tập.";
 
         try {
           const data = await response.json();
@@ -74,7 +152,8 @@ export default function Home() {
         throw new Error(message);
       }
 
-      const data: StudyResult = await response.json();
+      const data: StudyResult =
+        await response.json();
 
       setResult(data);
 
@@ -92,17 +171,32 @@ export default function Home() {
       if (error instanceof Error) {
         setError(error.message);
       } else {
-        setError("Đã xảy ra lỗi không xác định.");
+        setError(
+          "Đã xảy ra lỗi không xác định."
+        );
       }
     } finally {
       setLoading(false);
     }
   };
 
+  // --------------------------------
+  // Clear
+  // --------------------------------
+
   const handleClear = () => {
     setContent("");
+    setSelectedFile(null);
     setResult(null);
     setError("");
+
+    const input = document.getElementById(
+      "study-file"
+    ) as HTMLInputElement | null;
+
+    if (input) {
+      input.value = "";
+    }
   };
 
   return (
@@ -118,19 +212,27 @@ export default function Home() {
         <header className="topbar">
 
           <div className="brand">
+
             <div className="brand-mark">
               SM
             </div>
 
             <div>
               <h1>StudyMate</h1>
-              <span>AI Learning Assistant</span>
+
+              <span>
+                AI Learning Assistant
+              </span>
             </div>
+
           </div>
 
           <div className="status">
+
             <span className="status-dot" />
+
             Gemini AI
+
           </div>
 
         </header>
@@ -147,13 +249,18 @@ export default function Home() {
           <h2>
             Turn your study material
             <br />
-            into a <span>smarter study plan.</span>
+            into a{" "}
+            <span>
+              smarter study plan.
+            </span>
           </h2>
 
           <p>
-            Paste your lesson, notes or study material.
-            StudyMate will transform it into summaries,
-            key points, flashcards and quizzes.
+            Upload your document or paste
+            your lesson, notes or study
+            material. StudyMate will transform
+            it into summaries, key points,
+            flashcards, quizzes and a study plan.
           </p>
 
         </section>
@@ -166,20 +273,27 @@ export default function Home() {
           <div className="section-heading">
 
             <div>
+
               <span className="section-number">
                 01
               </span>
 
               <div>
-                <h3>Your study material</h3>
+
+                <h3>
+                  Your study material
+                </h3>
 
                 <p>
-                  Paste the content you want to learn.
+                  Upload a document or paste
+                  the content you want to learn.
                 </p>
+
               </div>
+
             </div>
 
-            {content && (
+            {(content || selectedFile) && (
               <button
                 type="button"
                 className="clear-button"
@@ -194,12 +308,86 @@ export default function Home() {
 
           <form onSubmit={handleSubmit}>
 
+            {/* File upload */}
+
+            <div className="file-upload">
+
+              <label
+                htmlFor="study-file"
+                className="file-upload-button"
+              >
+
+                <span className="file-upload-icon">
+                  +
+                </span>
+
+                <span>
+                  Upload document
+                </span>
+
+              </label>
+
+              <input
+                id="study-file"
+                type="file"
+                accept=".pdf,.docx,.txt"
+                onChange={handleFileChange}
+                hidden
+              />
+
+              <span className="file-upload-hint">
+                PDF, DOCX or TXT · Max 10MB
+              </span>
+
+              {selectedFile && (
+                <div className="selected-file">
+
+                  <div>
+
+                    <strong>
+                      {selectedFile.name}
+                    </strong>
+
+                    <span>
+                      {(
+                        selectedFile.size /
+                        1024
+                      ).toFixed(1)}{" "}
+                      KB
+                    </span>
+
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleRemoveFile}
+                  >
+                    Remove
+                  </button>
+
+                </div>
+              )}
+
+            </div>
+
+
+            {/* Divider */}
+
+            <div className="input-divider">
+              <span>OR</span>
+            </div>
+
+
+            {/* Text input */}
+
             <div className="textarea-wrapper">
 
               <textarea
                 value={content}
                 onChange={(event) =>
-                  setContent(event.target.value)
+                  setContent(
+                    event.target.value
+                  )
                 }
                 placeholder={
                   "Paste your lesson, lecture notes, textbook content...\n\nVí dụ:\nTCP là một giao thức hướng kết nối trong bộ giao thức TCP/IP..."
@@ -208,25 +396,42 @@ export default function Home() {
               />
 
               <div className="character-count">
-                {content.length.toLocaleString()} characters
+                {content.length.toLocaleString()}{" "}
+                characters
               </div>
 
             </div>
 
 
+            {/* Error */}
+
             {error && (
               <div className="error-box">
-                <strong>Error</strong>
-                <span>{error}</span>
+
+                <strong>
+                  Error
+                </strong>
+
+                <span>
+                  {error}
+                </span>
+
               </div>
             )}
 
 
+            {/* Footer */}
+
             <div className="form-footer">
 
               <div className="input-hint">
-                <span>AI</span>
+
+                <span>
+                  AI
+                </span>
+
                 Summary · Flashcards · Quiz · Study Plan
+
               </div>
 
               <button
@@ -234,19 +439,23 @@ export default function Home() {
                 className="generate-button"
                 disabled={loading}
               >
+
                 {loading ? (
                   <>
                     <span className="spinner" />
+
                     Analyzing...
                   </>
                 ) : (
                   <>
                     Generate
+
                     <span className="arrow">
                       →
                     </span>
                   </>
                 )}
+
               </button>
 
             </div>
@@ -262,9 +471,11 @@ export default function Home() {
           <section className="loading-card">
 
             <div className="loading-animation">
+
               <span />
               <span />
               <span />
+
             </div>
 
             <h3>
@@ -272,7 +483,8 @@ export default function Home() {
             </h3>
 
             <p>
-              Creating your personalized study content...
+              Extracting content and creating
+              your personalized study material...
             </p>
 
           </section>
@@ -297,16 +509,19 @@ export default function Home() {
                   GENERATED STUDY MATERIAL
                 </div>
 
-                <h2>{result.title}</h2>
+                <h2>
+                  {result.title}
+                </h2>
 
                 <p>
-                  Your learning material has been
-                  generated by StudyMate.
+                  Your learning material has
+                  been generated by StudyMate.
                 </p>
 
               </div>
 
               <div className="result-count">
+
                 <strong>
                   {result.quiz.length}
                 </strong>
@@ -314,6 +529,7 @@ export default function Home() {
                 <span>
                   quiz questions
                 </span>
+
               </div>
 
             </div>
@@ -330,8 +546,15 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <span>01</span>
-                  <h3>Summary</h3>
+
+                  <span>
+                    01
+                  </span>
+
+                  <h3>
+                    Summary
+                  </h3>
+
                 </div>
 
               </div>
@@ -354,8 +577,15 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <span>02</span>
-                  <h3>Key Points</h3>
+
+                  <span>
+                    02
+                  </span>
+
+                  <h3>
+                    Key Points
+                  </h3>
+
                 </div>
 
               </div>
@@ -370,13 +600,16 @@ export default function Home() {
                     >
 
                       <span className="point-number">
-                        {String(index + 1).padStart(
-                          2,
-                          "0"
-                        )}
+
+                        {String(
+                          index + 1
+                        ).padStart(2, "0")}
+
                       </span>
 
-                      <p>{point}</p>
+                      <p>
+                        {point}
+                      </p>
 
                     </div>
                   )
@@ -398,8 +631,15 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <span>03</span>
-                  <h3>Flashcards</h3>
+
+                  <span>
+                    03
+                  </span>
+
+                  <h3>
+                    Flashcards
+                  </h3>
+
                 </div>
 
               </div>
@@ -436,8 +676,15 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <span>04</span>
-                  <h3>Quiz</h3>
+
+                  <span>
+                    04
+                  </span>
+
+                  <h3>
+                    Quiz
+                  </h3>
+
                 </div>
 
               </div>
@@ -474,8 +721,15 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <span>05</span>
-                  <h3>Study Plan</h3>
+
+                  <span>
+                    05
+                  </span>
+
+                  <h3>
+                    Study Plan
+                  </h3>
+
                 </div>
 
               </div>
@@ -493,7 +747,9 @@ export default function Home() {
                         {index + 1}
                       </div>
 
-                      <p>{step}</p>
+                      <p>
+                        {step}
+                      </p>
 
                     </div>
                   )
@@ -530,6 +786,7 @@ export default function Home() {
         )}
 
       </div>
+
     </main>
   );
 }
@@ -553,32 +810,45 @@ function Flashcard({
     <button
       type="button"
       className={`flashcard ${
-        showAnswer ? "flashcard-active" : ""
+        showAnswer
+          ? "flashcard-active"
+          : ""
       }`}
       onClick={() =>
-        setShowAnswer((current) => !current)
+        setShowAnswer(
+          (current) => !current
+        )
       }
     >
 
       <div className="flashcard-top">
 
         <span>
-          CARD {String(index + 1).padStart(2, "0")}
+          CARD{" "}
+          {String(index + 1).padStart(
+            2,
+            "0"
+          )}
         </span>
 
         <span className="flip-label">
+
           {showAnswer
             ? "QUESTION"
             : "REVEAL"}
+
         </span>
 
       </div>
+
 
       <div className="flashcard-content">
 
         {showAnswer ? (
           <>
-            <small>ANSWER</small>
+            <small>
+              ANSWER
+            </small>
 
             <p>
               {card.answer}
@@ -586,7 +856,9 @@ function Flashcard({
           </>
         ) : (
           <>
-            <small>QUESTION</small>
+            <small>
+              QUESTION
+            </small>
 
             <h4>
               {card.question}
@@ -596,10 +868,13 @@ function Flashcard({
 
       </div>
 
+
       <div className="flashcard-bottom">
+
         {showAnswer
           ? "Click to see question"
           : "Click to reveal answer"}
+
       </div>
 
     </button>
@@ -621,7 +896,8 @@ function QuizCard({
   const [selected, setSelected] =
     useState<string | null>(null);
 
-  const answered = selected !== null;
+  const answered =
+    selected !== null;
 
   const isCorrect =
     selected === quiz.correct_answer;
@@ -632,10 +908,17 @@ function QuizCard({
       <div className="quiz-question">
 
         <span className="quiz-number">
-          {String(index + 1).padStart(2, "0")}
+
+          {String(index + 1).padStart(
+            2,
+            "0"
+          )}
+
         </span>
 
-        <h4>{quiz.question}</h4>
+        <h4>
+          {quiz.question}
+        </h4>
 
       </div>
 
@@ -649,11 +932,16 @@ function QuizCard({
               selected === option;
 
             const isCorrectAnswer =
-              option === quiz.correct_answer;
+              option ===
+              quiz.correct_answer;
 
-            let className = "quiz-option";
+            let className =
+              "quiz-option";
 
-            if (answered && isCorrectAnswer) {
+            if (
+              answered &&
+              isCorrectAnswer
+            ) {
               className += " correct";
             }
 
@@ -677,9 +965,11 @@ function QuizCard({
               >
 
                 <span className="option-letter">
+
                   {String.fromCharCode(
                     65 + optionIndex
                   )}
+
                 </span>
 
                 <span>
@@ -706,15 +996,19 @@ function QuizCard({
           <div className="feedback-title">
 
             <strong>
+
               {isCorrect
                 ? "Correct"
                 : "Not quite"}
+
             </strong>
 
             {!isCorrect && (
               <span>
+
                 Correct answer:{" "}
                 {quiz.correct_answer}
+
               </span>
             )}
 
