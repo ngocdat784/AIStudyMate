@@ -6,7 +6,7 @@ from app.services.study_service import generate_study_material
 
 router = APIRouter(
     prefix="/api/study",
-    tags=["StudyMate"],
+    tags=["TextileAI - Training"],
 )
 
 
@@ -16,8 +16,8 @@ ALLOWED_EXTENSIONS = {
     ".txt",
 }
 
-
 MAX_FILE_SIZE = 10 * 1024 * 1024
+MAX_CONTENT_LENGTH = 100_000
 
 
 @router.post("/generate")
@@ -25,12 +25,40 @@ async def generate_study(
     content: str = Form(""),
     file: UploadFile | None = File(None),
 ):
+    """
+    TextileAI - Training & Document Analysis
+
+    Nhận:
+    - Nội dung văn bản trực tiếp
+    - Hoặc tài liệu PDF/DOCX/TXT
+
+    Trả về:
+    - Summary
+    - Key Points
+    - Flashcards
+    - Quiz
+    - Study Plan
+    """
+
     try:
         final_content = content.strip()
 
-        # -----------------------------
-        # Nếu user upload file
-        # -----------------------------
+        # =========================================================
+        # 1. Kiểm tra nội dung nhập trực tiếp
+        # =========================================================
+
+        if len(final_content) > MAX_CONTENT_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Nội dung quá dài. "
+                    "Vui lòng giới hạn nội dung trong 100.000 ký tự."
+                ),
+            )
+
+        # =========================================================
+        # 2. Nếu người dùng upload tài liệu
+        # =========================================================
 
         if file is not None:
 
@@ -40,21 +68,31 @@ async def generate_study(
                     detail="Tên file không hợp lệ.",
                 )
 
-            filename = file.filename.lower()
+            filename = file.filename.strip()
 
+            if not filename:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Tên file không hợp lệ.",
+                )
+
+            # Lấy extension
             extension = ""
 
             if "." in filename:
-                extension = "." + filename.rsplit(".", 1)[1]
+                extension = "." + filename.rsplit(".", 1)[1].lower()
 
+            # Kiểm tra định dạng
             if extension not in ALLOWED_EXTENSIONS:
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        "Chỉ hỗ trợ file PDF, DOCX hoặc TXT."
+                        "TextileAI hiện hỗ trợ "
+                        "PDF, DOCX và TXT."
                     ),
                 )
 
+            # Đọc file
             file_bytes = await file.read()
 
             if not file_bytes:
@@ -63,16 +101,21 @@ async def generate_study(
                     detail="File rỗng.",
                 )
 
+            # Kiểm tra kích thước
             if len(file_bytes) > MAX_FILE_SIZE:
                 raise HTTPException(
                     status_code=400,
                     detail="File không được vượt quá 10MB.",
                 )
 
+            # =====================================================
+            # Trích xuất nội dung tài liệu
+            # =====================================================
+
             try:
-                final_content = extract_text(
+                extracted_text = extract_text(
                     file_bytes=file_bytes,
-                    filename=file.filename,
+                    filename=filename,
                     content_type=file.content_type,
                 )
 
@@ -82,9 +125,12 @@ async def generate_study(
                     detail=str(e),
                 )
 
-        # -----------------------------
-        # Không có nội dung
-        # -----------------------------
+            # File upload được ưu tiên hơn nội dung textarea
+            final_content = extracted_text.strip()
+
+        # =========================================================
+        # 3. Kiểm tra nội dung sau khi xử lý
+        # =========================================================
 
         if not final_content:
             raise HTTPException(
@@ -95,13 +141,26 @@ async def generate_study(
                 ),
             )
 
-        # -----------------------------
-        # Generate study material
-        # -----------------------------
+        if len(final_content) > MAX_CONTENT_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Nội dung tài liệu quá dài. "
+                    "Vui lòng sử dụng tài liệu ngắn hơn."
+                ),
+            )
+
+        # =========================================================
+        # 4. AI phân tích tài liệu
+        # =========================================================
 
         result = generate_study_material(
             content=final_content,
         )
+
+        # =========================================================
+        # 5. Trả kết quả
+        # =========================================================
 
         return result.model_dump()
 
@@ -111,5 +170,5 @@ async def generate_study(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"StudyMate failed: {str(e)}",
+            detail=f"TextileAI failed: {str(e)}",
         )
