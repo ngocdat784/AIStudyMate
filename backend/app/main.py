@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes.study import router as study_router
-
+from app.routes.production import router as production_router
 
 app = FastAPI(
     title="AI StudyMate API",
@@ -24,7 +24,7 @@ app.add_middleware(
 
 
 app.include_router(study_router)
-
+app.include_router(production_router)
 
 @app.get("/")
 def root():

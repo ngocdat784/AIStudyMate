@@ -1,70 +1,112 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  useMemo,
+  useState,
+} from "react";
 
-type Flashcard = {
-  question: string;
-  answer: string;
+type KPI = {
+  name: string;
+  value: number | string;
+  unit: string;
+  description: string;
 };
 
-type QuizQuestion = {
-  question: string;
-  options: string[];
-  correct_answer: string;
-  explanation: string;
+type MachinePerformance = {
+  machine: string;
+  production: number;
+  defects: number;
+  defect_rate: number;
+  downtime: number;
 };
 
-type StudyResult = {
+type DailyProduction = {
+  date: string;
+  production: number;
+  defects: number;
+  defect_rate: number;
+  downtime: number;
+};
+
+type DataScope = {
+  has_machine_data: boolean;
+  has_defect_data: boolean;
+  has_downtime_data: boolean;
+  has_date_data: boolean;
+};
+
+type ProductionResult = {
   title: string;
   summary: string;
-  key_points: string[];
-  flashcards: Flashcard[];
-  quiz: QuizQuestion[];
-  study_plan: string[];
+
+  kpis: KPI[];
+
+  insights: string[];
+  warnings: string[];
+  recommendations: string[];
+
+  machine_performance: MachinePerformance[];
+  daily_production: DailyProduction[];
+
+  data_scope: DataScope;
 };
 
 export default function Home() {
-  const [content, setContent] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFile, setSelectedFile] =
+    useState<File | null>(null);
 
-  const [result, setResult] = useState<StudyResult | null>(null);
+  const [result, setResult] =
+    useState<ProductionResult | null>(null);
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [loading, setLoading] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
 
   // --------------------------------
-  // File upload
+  // File
   // --------------------------------
 
   const handleFileChange = (
     event: ChangeEvent<HTMLInputElement>
   ) => {
-    const file = event.target.files?.[0];
+    const file =
+      event.target.files?.[0];
 
     if (!file) {
       return;
     }
 
-    const allowedExtensions = [
-      ".pdf",
-      ".docx",
-      ".txt",
-    ];
-
     const extension =
-      "." + file.name.split(".").pop()?.toLowerCase();
+      "." +
+      file.name
+        .split(".")
+        .pop()
+        ?.toLowerCase();
 
-    if (!allowedExtensions.includes(extension)) {
+    if (
+      ![".csv", ".xlsx"].includes(
+        extension || ""
+      )
+    ) {
       setError(
-        "Chỉ hỗ trợ file PDF, DOCX hoặc TXT."
+        "Chỉ hỗ trợ file CSV hoặc XLSX."
       );
 
       event.target.value = "";
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      setError("File không được vượt quá 10MB.");
+    if (
+      file.size >
+      10 * 1024 * 1024
+    ) {
+      setError(
+        "File không được vượt quá 10MB."
+      );
 
       event.target.value = "";
       return;
@@ -75,23 +117,7 @@ export default function Home() {
   };
 
   // --------------------------------
-  // Remove selected file
-  // --------------------------------
-
-  const handleRemoveFile = () => {
-    setSelectedFile(null);
-
-    const input = document.getElementById(
-      "study-file"
-    ) as HTMLInputElement | null;
-
-    if (input) {
-      input.value = "";
-    }
-  };
-
-  // --------------------------------
-  // Generate study material
+  // Analyze
   // --------------------------------
 
   const handleSubmit = async (
@@ -99,9 +125,9 @@ export default function Home() {
   ) => {
     event.preventDefault();
 
-    if (!content.trim() && !selectedFile) {
+    if (!selectedFile) {
       setError(
-        "Vui lòng nhập nội dung hoặc upload tài liệu."
+        "Vui lòng chọn file CSV hoặc XLSX."
       );
       return;
     }
@@ -111,60 +137,57 @@ export default function Home() {
     setResult(null);
 
     try {
-      const formData = new FormData();
+      const formData =
+        new FormData();
 
-      if (content.trim()) {
-        formData.append(
-          "content",
-          content.trim()
-        );
-      }
-
-      if (selectedFile) {
-        formData.append(
-          "file",
-          selectedFile
-        );
-      }
-
-      const response = await fetch(
-        "http://127.0.0.1:8000/api/study/generate",
-        {
-          method: "POST",
-          body: formData,
-        }
+      formData.append(
+        "file",
+        selectedFile
       );
+
+      const response =
+        await fetch(
+          "http://127.0.0.1:8000/api/production/analyze",
+          {
+            method: "POST",
+            body: formData,
+          }
+        );
 
       if (!response.ok) {
         let message =
-          "Không thể tạo tài liệu học tập.";
+          "Không thể phân tích dữ liệu sản xuất.";
 
         try {
-          const data = await response.json();
+          const data =
+            await response.json();
 
           if (data.detail) {
             message = data.detail;
           }
         } catch {
-          // Ignore JSON parsing errors.
+          // Ignore
         }
 
         throw new Error(message);
       }
 
-      const data: StudyResult =
+      const data: ProductionResult =
         await response.json();
 
       setResult(data);
 
       setTimeout(() => {
         document
-          .getElementById("study-result")
+          .getElementById(
+            "dashboard"
+          )
           ?.scrollIntoView({
             behavior: "smooth",
             block: "start",
           });
       }, 100);
+
     } catch (error) {
       console.error(error);
 
@@ -185,49 +208,100 @@ export default function Home() {
   // --------------------------------
 
   const handleClear = () => {
-    setContent("");
     setSelectedFile(null);
     setResult(null);
     setError("");
 
-    const input = document.getElementById(
-      "study-file"
-    ) as HTMLInputElement | null;
+    const input =
+      document.getElementById(
+        "production-file"
+      ) as HTMLInputElement | null;
 
     if (input) {
       input.value = "";
     }
   };
 
+  // --------------------------------
+  // KPI helpers
+  // --------------------------------
+
+  const getKPI = (
+    name: string
+  ) => {
+    return result?.kpis.find(
+      (kpi) =>
+        kpi.name === name
+    );
+  };
+
+  const totalProduction =
+    getKPI("Tổng sản lượng");
+
+  const defectRate =
+    getKPI("Tỷ lệ lỗi tổng thể") ||
+    getKPI("Tỷ lệ lỗi");
+
+  const totalDowntime =
+    getKPI(
+      "Tổng thời gian dừng máy"
+    );
+
+  const machineCount =
+    getKPI("Số lượng máy");
+
+  // --------------------------------
+  // Chart
+  // --------------------------------
+
+  const maxDailyProduction =
+    useMemo(() => {
+      if (
+        !result ||
+        result.daily_production.length === 0
+      ) {
+        return 0;
+      }
+
+      return Math.max(
+        ...result.daily_production.map(
+          (item) =>
+            item.production
+        )
+      );
+    }, [result]);
+
   return (
-    <main className="app">
+    <main className="dashboard-app">
 
       <div className="background-glow background-glow-one" />
       <div className="background-glow background-glow-two" />
 
-      <div className="container">
+      <div className="dashboard-container">
 
+        {/* -------------------------------- */}
         {/* Header */}
+        {/* -------------------------------- */}
 
-        <header className="topbar">
+        <header className="dashboard-topbar">
 
-          <div className="brand">
+          <div className="dashboard-brand">
 
             <div className="brand-mark">
-              SM
+              TX
             </div>
 
             <div>
-              <h1>StudyMate</h1>
+              <h1>TextileAI</h1>
 
               <span>
-                AI Learning Assistant
+                Production Intelligence
               </span>
             </div>
 
           </div>
 
-          <div className="status">
+          <div className="system-status">
 
             <span className="status-dot" />
 
@@ -238,37 +312,41 @@ export default function Home() {
         </header>
 
 
+        {/* -------------------------------- */}
         {/* Hero */}
+        {/* -------------------------------- */}
 
-        <section className="hero">
+        <section className="dashboard-hero">
 
           <div className="hero-badge">
-            AI-powered learning
+            AI Production Analytics
           </div>
 
           <h2>
-            Turn your study material
+            Understand your production
             <br />
-            into a{" "}
+            with{" "}
             <span>
-              smarter study plan.
+              data-driven insights.
             </span>
           </h2>
 
           <p>
-            Upload your document or paste
-            your lesson, notes or study
-            material. StudyMate will transform
-            it into summaries, key points,
-            flashcards, quizzes and a study plan.
+            Upload dữ liệu sản xuất từ
+            CSV hoặc Excel. TextileAI sẽ
+            tính toán KPI, phân tích theo
+            máy và theo ngày, sau đó tạo
+            các nhận định bằng AI.
           </p>
 
         </section>
 
 
-        {/* Input */}
+        {/* -------------------------------- */}
+        {/* Upload */}
+        {/* -------------------------------- */}
 
-        <section className="input-card">
+        <section className="upload-card">
 
           <div className="section-heading">
 
@@ -281,19 +359,19 @@ export default function Home() {
               <div>
 
                 <h3>
-                  Your study material
+                  Production data
                 </h3>
 
                 <p>
-                  Upload a document or paste
-                  the content you want to learn.
+                  Upload dữ liệu sản xuất
+                  để bắt đầu phân tích.
                 </p>
 
               </div>
 
             </div>
 
-            {(content || selectedFile) && (
+            {selectedFile && (
               <button
                 type="button"
                 className="clear-button"
@@ -306,104 +384,74 @@ export default function Home() {
           </div>
 
 
-          <form onSubmit={handleSubmit}>
+          <form
+            onSubmit={handleSubmit}
+          >
 
-            {/* File upload */}
+            <label
+              htmlFor="production-file"
+              className="production-upload"
+            >
 
-            <div className="file-upload">
-
-              <label
-                htmlFor="study-file"
-                className="file-upload-button"
-              >
-
-                <span className="file-upload-icon">
-                  +
-                </span>
-
-                <span>
-                  Upload document
-                </span>
-
-              </label>
-
-              <input
-                id="study-file"
-                type="file"
-                accept=".pdf,.docx,.txt"
-                onChange={handleFileChange}
-                hidden
-              />
-
-              <span className="file-upload-hint">
-                PDF, DOCX or TXT · Max 10MB
-              </span>
-
-              {selectedFile && (
-                <div className="selected-file">
-
-                  <div>
-
-                    <strong>
-                      {selectedFile.name}
-                    </strong>
-
-                    <span>
-                      {(
-                        selectedFile.size /
-                        1024
-                      ).toFixed(1)}{" "}
-                      KB
-                    </span>
-
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleRemoveFile}
-                  >
-                    Remove
-                  </button>
-
-                </div>
-              )}
-
-            </div>
-
-
-            {/* Divider */}
-
-            <div className="input-divider">
-              <span>OR</span>
-            </div>
-
-
-            {/* Text input */}
-
-            <div className="textarea-wrapper">
-
-              <textarea
-                value={content}
-                onChange={(event) =>
-                  setContent(
-                    event.target.value
-                  )
-                }
-                placeholder={
-                  "Paste your lesson, lecture notes, textbook content...\n\nVí dụ:\nTCP là một giao thức hướng kết nối trong bộ giao thức TCP/IP..."
-                }
-                rows={12}
-              />
-
-              <div className="character-count">
-                {content.length.toLocaleString()}{" "}
-                characters
+              <div className="upload-plus">
+                +
               </div>
 
-            </div>
+              <div>
+
+                <strong>
+                  Upload production data
+                </strong>
+
+                <span>
+                  CSV hoặc XLSX · Max 10MB
+                </span>
+
+              </div>
+
+            </label>
+
+            <input
+              id="production-file"
+              type="file"
+              accept=".csv,.xlsx"
+              onChange={
+                handleFileChange
+              }
+              hidden
+            />
 
 
-            {/* Error */}
+            {selectedFile && (
+              <div className="selected-production-file">
+
+                <div>
+
+                  <strong>
+                    {selectedFile.name}
+                  </strong>
+
+                  <span>
+                    {(
+                      selectedFile.size /
+                      1024
+                    ).toFixed(1)} KB
+                  </span>
+
+                </div>
+
+                <button
+                  type="button"
+                  onClick={
+                    handleClear
+                  }
+                >
+                  Remove
+                </button>
+
+              </div>
+            )}
+
 
             {error && (
               <div className="error-box">
@@ -420,37 +468,33 @@ export default function Home() {
             )}
 
 
-            {/* Footer */}
+            <div className="upload-footer">
 
-            <div className="form-footer">
-
-              <div className="input-hint">
+              <div className="upload-hint">
 
                 <span>
                   AI
                 </span>
 
-                Summary · Flashcards · Quiz · Study Plan
+                KPI · Quality · Downtime · Insights
 
               </div>
 
               <button
                 type="submit"
-                className="generate-button"
+                className="analyze-button"
                 disabled={loading}
               >
 
                 {loading ? (
                   <>
                     <span className="spinner" />
-
                     Analyzing...
                   </>
                 ) : (
                   <>
-                    Generate
-
-                    <span className="arrow">
+                    Analyze production
+                    <span>
                       →
                     </span>
                   </>
@@ -465,10 +509,12 @@ export default function Home() {
         </section>
 
 
+        {/* -------------------------------- */}
         {/* Loading */}
+        {/* -------------------------------- */}
 
         {loading && (
-          <section className="loading-card">
+          <section className="dashboard-loading">
 
             <div className="loading-animation">
 
@@ -479,34 +525,36 @@ export default function Home() {
             </div>
 
             <h3>
-              StudyMate is analyzing your material
+              TextileAI is analyzing production data
             </h3>
 
             <p>
-              Extracting content and creating
-              your personalized study material...
+              Calculating KPIs and generating
+              production insights...
             </p>
 
           </section>
         )}
 
 
-        {/* Result */}
+        {/* -------------------------------- */}
+        {/* Dashboard */}
+        {/* -------------------------------- */}
 
         {result && !loading && (
           <section
-            id="study-result"
-            className="result-section"
+            id="dashboard"
+            className="production-dashboard"
           >
 
-            {/* Result header */}
+            {/* Dashboard heading */}
 
-            <div className="result-header">
+            <div className="dashboard-heading">
 
               <div>
 
                 <div className="result-label">
-                  GENERATED STUDY MATERIAL
+                  PRODUCTION ANALYSIS
                 </div>
 
                 <h2>
@@ -514,259 +562,354 @@ export default function Home() {
                 </h2>
 
                 <p>
-                  Your learning material has
-                  been generated by StudyMate.
+                  {result.summary}
                 </p>
 
               </div>
 
-              <div className="result-count">
-
-                <strong>
-                  {result.quiz.length}
-                </strong>
+              <div className="data-file">
 
                 <span>
-                  quiz questions
+                  DATASET
                 </span>
+
+                <strong>
+                  {selectedFile?.name}
+                </strong>
 
               </div>
 
             </div>
 
 
-            {/* Summary */}
+            {/* -------------------------------- */}
+            {/* KPI Cards */}
+            {/* -------------------------------- */}
 
-            <section className="result-card summary-card">
+            <section className="kpi-grid">
 
-              <div className="card-title">
+              <KPICard
+                label="Tổng sản lượng"
+                value={
+                  totalProduction
+                    ? Number(
+                        totalProduction.value
+                      ).toLocaleString(
+                        "vi-VN"
+                      )
+                    : "--"
+                }
+                unit={
+                  totalProduction?.unit ||
+                  "đơn vị"
+                }
+              />
 
-                <div className="card-icon">
-                  S
-                </div>
+              <KPICard
+                label="Tỷ lệ lỗi"
+                value={
+                  defectRate
+                    ? Number(
+                        defectRate.value
+                      ).toFixed(2)
+                    : "--"
+                }
+                unit="%"
+              />
 
-                <div>
+              <KPICard
+                label="Tổng downtime"
+                value={
+                  totalDowntime
+                    ? Number(
+                        totalDowntime.value
+                      ).toLocaleString(
+                        "vi-VN"
+                      )
+                    : "--"
+                }
+                unit={
+                  totalDowntime?.unit ||
+                  "phút"
+                }
+              />
 
-                  <span>
-                    01
-                  </span>
-
-                  <h3>
-                    Summary
-                  </h3>
-
-                </div>
-
-              </div>
-
-              <p className="summary-text">
-                {result.summary}
-              </p>
-
-            </section>
-
-
-            {/* Key points */}
-
-            <section className="result-card">
-
-              <div className="card-title">
-
-                <div className="card-icon">
-                  K
-                </div>
-
-                <div>
-
-                  <span>
-                    02
-                  </span>
-
-                  <h3>
-                    Key Points
-                  </h3>
-
-                </div>
-
-              </div>
-
-              <div className="key-points">
-
-                {result.key_points.map(
-                  (point, index) => (
-                    <div
-                      className="key-point"
-                      key={index}
-                    >
-
-                      <span className="point-number">
-
-                        {String(
-                          index + 1
-                        ).padStart(2, "0")}
-
-                      </span>
-
-                      <p>
-                        {point}
-                      </p>
-
-                    </div>
-                  )
-                )}
-
-              </div>
+              <KPICard
+                label="Số lượng máy"
+                value={
+                  machineCount
+                    ? Number(
+                        machineCount.value
+                      ).toString()
+                    : "--"
+                }
+                unit={
+                  machineCount?.unit ||
+                  "máy"
+                }
+              />
 
             </section>
 
 
-            {/* Flashcards */}
+            {/* -------------------------------- */}
+            {/* Daily production */}
+            {/* -------------------------------- */}
 
-            <section className="result-card">
+            {result.daily_production.length >
+              0 && (
+              <section className="dashboard-card">
 
-              <div className="card-title">
+                <div className="dashboard-card-header">
 
-                <div className="card-icon">
-                  F
+                  <div>
+
+                    <span>
+                      01
+                    </span>
+
+                    <h3>
+                      Sản lượng theo ngày
+                    </h3>
+
+                  </div>
+
+                  <p>
+                    Production output
+                  </p>
+
                 </div>
 
-                <div>
 
-                  <span>
-                    03
-                  </span>
+                <div className="daily-chart">
 
-                  <h3>
-                    Flashcards
-                  </h3>
+                  {result.daily_production.map(
+                    (item) => {
+
+                      const height =
+                        maxDailyProduction >
+                        0
+                          ? Math.max(
+                              8,
+                              (
+                                item.production /
+                                maxDailyProduction
+                              ) * 100
+                            )
+                          : 0;
+
+                      return (
+                        <div
+                          className="chart-column"
+                          key={item.date}
+                        >
+
+                          <div className="chart-value">
+                            {item.production.toLocaleString(
+                              "vi-VN"
+                            )}
+                          </div>
+
+                          <div className="chart-bar-wrapper">
+
+                            <div
+                              className="chart-bar"
+                              style={{
+                                height:
+                                  `${height}%`,
+                              }}
+                            />
+
+                          </div>
+
+                          <div className="chart-date">
+                            {formatDate(
+                              item.date
+                            )}
+                          </div>
+
+                        </div>
+                      );
+                    }
+                  )}
 
                 </div>
 
-              </div>
+              </section>
+            )}
 
-              <p className="card-description">
-                Click a card to reveal the answer.
-              </p>
 
-              <div className="flashcard-grid">
+            {/* -------------------------------- */}
+            {/* Machines */}
+            {/* -------------------------------- */}
 
-                {result.flashcards.map(
-                  (card, index) => (
-                    <Flashcard
-                      key={index}
-                      card={card}
-                      index={index}
-                    />
-                  )
-                )}
+            {result.machine_performance.length >
+              0 && (
+              <section className="dashboard-card">
 
-              </div>
+                <div className="dashboard-card-header">
+
+                  <div>
+
+                    <span>
+                      02
+                    </span>
+
+                    <h3>
+                      Phân tích theo máy
+                    </h3>
+
+                  </div>
+
+                  <p>
+                    Machine performance
+                  </p>
+
+                </div>
+
+
+                <div className="machine-table-wrapper">
+
+                  <table className="machine-table">
+
+                    <thead>
+
+                      <tr>
+
+                        <th>
+                          Machine
+                        </th>
+
+                        <th>
+                          Production
+                        </th>
+
+                        <th>
+                          Defects
+                        </th>
+
+                        <th>
+                          Defect rate
+                        </th>
+
+                        <th>
+                          Downtime
+                        </th>
+
+                      </tr>
+
+                    </thead>
+
+                    <tbody>
+
+                      {result.machine_performance.map(
+                        (machine) => (
+                          <tr
+                            key={
+                              machine.machine
+                            }
+                          >
+
+                            <td>
+                              <strong>
+                                {machine.machine}
+                              </strong>
+                            </td>
+
+                            <td>
+                              {machine.production.toLocaleString(
+                                "vi-VN"
+                              )}
+                            </td>
+
+                            <td>
+                              {machine.defects.toLocaleString(
+                                "vi-VN"
+                              )}
+                            </td>
+
+                            <td>
+
+                              <span className="rate-value">
+                                {machine.defect_rate.toFixed(
+                                  2
+                                )}
+                                %
+                              </span>
+
+                            </td>
+
+                            <td>
+                              {
+                                machine.downtime
+                              }{" "}
+                              phút
+                            </td>
+
+                          </tr>
+                        )
+                      )}
+
+                    </tbody>
+
+                  </table>
+
+                </div>
+
+              </section>
+            )}
+
+
+            {/* -------------------------------- */}
+            {/* AI Insights */}
+            {/* -------------------------------- */}
+
+            <section className="ai-grid">
+
+              <AISection
+                number="03"
+                title="AI Insights"
+                items={
+                  result.insights
+                }
+                className="insights"
+              />
+
+              <AISection
+                number="04"
+                title="Warnings"
+                items={
+                  result.warnings
+                }
+                className="warnings"
+              />
 
             </section>
 
 
-            {/* Quiz */}
+            {/* -------------------------------- */}
+            {/* Recommendations */}
+            {/* -------------------------------- */}
 
-            <section className="result-card">
-
-              <div className="card-title">
-
-                <div className="card-icon">
-                  Q
-                </div>
-
-                <div>
-
-                  <span>
-                    04
-                  </span>
-
-                  <h3>
-                    Quiz
-                  </h3>
-
-                </div>
-
-              </div>
-
-              <p className="card-description">
-                Test your understanding.
-              </p>
-
-              <div className="quiz-list">
-
-                {result.quiz.map(
-                  (quiz, index) => (
-                    <QuizCard
-                      key={index}
-                      quiz={quiz}
-                      index={index}
-                    />
-                  )
-                )}
-
-              </div>
-
-            </section>
+            <AISection
+              number="05"
+              title="AI Recommendations"
+              items={
+                result.recommendations
+              }
+              className="recommendations"
+            />
 
 
-            {/* Study plan */}
+            {/* -------------------------------- */}
+            {/* Footer */}
+            {/* -------------------------------- */}
 
-            <section className="result-card">
+            <div className="dashboard-footer">
 
-              <div className="card-title">
-
-                <div className="card-icon">
-                  P
-                </div>
-
-                <div>
-
-                  <span>
-                    05
-                  </span>
-
-                  <h3>
-                    Study Plan
-                  </h3>
-
-                </div>
-
-              </div>
-
-              <div className="study-plan">
-
-                {result.study_plan.map(
-                  (step, index) => (
-                    <div
-                      className="plan-step"
-                      key={index}
-                    >
-
-                      <div className="plan-number">
-                        {index + 1}
-                      </div>
-
-                      <p>
-                        {step}
-                      </p>
-
-                    </div>
-                  )
-                )}
-
-              </div>
-
-            </section>
-
-
-            {/* Bottom */}
-
-            <div className="result-footer">
-
-              <p>
-                Generated with AI StudyMate
-              </p>
+              <span>
+                Generated by TextileAI
+              </span>
 
               <button
                 type="button"
@@ -777,7 +920,7 @@ export default function Home() {
                   })
                 }
               >
-                Create another study set ↑
+                Analyze another dataset ↑
               </button>
 
             </div>
@@ -793,234 +936,124 @@ export default function Home() {
 
 
 /* -------------------------------- */
-/* Flashcard */
+/* KPI Card */
 /* -------------------------------- */
 
-function Flashcard({
-  card,
-  index,
+function KPICard({
+  label,
+  value,
+  unit,
 }: {
-  card: Flashcard;
-  index: number;
+  label: string;
+  value: string;
+  unit: string;
 }) {
-  const [showAnswer, setShowAnswer] =
-    useState(false);
-
   return (
-    <button
-      type="button"
-      className={`flashcard ${
-        showAnswer
-          ? "flashcard-active"
-          : ""
-      }`}
-      onClick={() =>
-        setShowAnswer(
-          (current) => !current
-        )
-      }
-    >
+    <div className="kpi-card">
 
-      <div className="flashcard-top">
+      <span className="kpi-label">
+        {label}
+      </span>
 
-        <span>
-          CARD{" "}
-          {String(index + 1).padStart(
-            2,
-            "0"
-          )}
-        </span>
-
-        <span className="flip-label">
-
-          {showAnswer
-            ? "QUESTION"
-            : "REVEAL"}
-
-        </span>
-
+      <div className="kpi-value">
+        {value}
       </div>
 
+      <span className="kpi-unit">
+        {unit}
+      </span>
 
-      <div className="flashcard-content">
-
-        {showAnswer ? (
-          <>
-            <small>
-              ANSWER
-            </small>
-
-            <p>
-              {card.answer}
-            </p>
-          </>
-        ) : (
-          <>
-            <small>
-              QUESTION
-            </small>
-
-            <h4>
-              {card.question}
-            </h4>
-          </>
-        )}
-
-      </div>
-
-
-      <div className="flashcard-bottom">
-
-        {showAnswer
-          ? "Click to see question"
-          : "Click to reveal answer"}
-
-      </div>
-
-    </button>
+    </div>
   );
 }
 
 
 /* -------------------------------- */
-/* Quiz */
+/* AI Section */
 /* -------------------------------- */
 
-function QuizCard({
-  quiz,
-  index,
+function AISection({
+  number,
+  title,
+  items,
+  className,
 }: {
-  quiz: QuizQuestion;
-  index: number;
+  number: string;
+  title: string;
+  items: string[];
+  className: string;
 }) {
-  const [selected, setSelected] =
-    useState<string | null>(null);
-
-  const answered =
-    selected !== null;
-
-  const isCorrect =
-    selected === quiz.correct_answer;
-
   return (
-    <div className="quiz-item">
+    <section
+      className={`dashboard-card ai-card ${className}`}
+    >
 
-      <div className="quiz-question">
+      <div className="dashboard-card-header">
 
-        <span className="quiz-number">
+        <div>
 
-          {String(index + 1).padStart(
-            2,
-            "0"
-          )}
+          <span>
+            {number}
+          </span>
 
-        </span>
+          <h3>
+            {title}
+          </h3>
 
-        <h4>
-          {quiz.question}
-        </h4>
+        </div>
 
       </div>
 
 
-      <div className="quiz-options">
+      {items.length === 0 ? (
+        <p className="empty-ai">
+          Không có dữ liệu.
+        </p>
+      ) : (
+        <div className="ai-list">
 
-        {quiz.options.map(
-          (option, optionIndex) => {
-
-            const isSelected =
-              selected === option;
-
-            const isCorrectAnswer =
-              option ===
-              quiz.correct_answer;
-
-            let className =
-              "quiz-option";
-
-            if (
-              answered &&
-              isCorrectAnswer
-            ) {
-              className += " correct";
-            }
-
-            if (
-              answered &&
-              isSelected &&
-              !isCorrectAnswer
-            ) {
-              className += " incorrect";
-            }
-
-            return (
-              <button
-                type="button"
-                key={option}
-                className={className}
-                disabled={answered}
-                onClick={() =>
-                  setSelected(option)
-                }
+          {items.map(
+            (item, index) => (
+              <div
+                className="ai-item"
+                key={index}
               >
 
-                <span className="option-letter">
-
-                  {String.fromCharCode(
-                    65 + optionIndex
-                  )}
-
-                </span>
-
                 <span>
-                  {option}
+                  {String(
+                    index + 1
+                  ).padStart(2, "0")}
                 </span>
 
-              </button>
-            );
-          }
-        )}
+                <p>
+                  {item}
+                </p>
 
-      </div>
-
-
-      {answered && (
-        <div
-          className={`quiz-feedback ${
-            isCorrect
-              ? "feedback-correct"
-              : "feedback-incorrect"
-          }`}
-        >
-
-          <div className="feedback-title">
-
-            <strong>
-
-              {isCorrect
-                ? "Correct"
-                : "Not quite"}
-
-            </strong>
-
-            {!isCorrect && (
-              <span>
-
-                Correct answer:{" "}
-                {quiz.correct_answer}
-
-              </span>
-            )}
-
-          </div>
-
-          <p>
-            {quiz.explanation}
-          </p>
+              </div>
+            )
+          )}
 
         </div>
       )}
 
-    </div>
+    </section>
   );
+}
+
+
+/* -------------------------------- */
+/* Helpers */
+/* -------------------------------- */
+
+function formatDate(
+  date: string
+) {
+  const parts =
+    date.split("-");
+
+  if (parts.length !== 3) {
+    return date;
+  }
+
+  return `${parts[2]}/${parts[1]}`;
 }
