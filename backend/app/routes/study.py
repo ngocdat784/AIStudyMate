@@ -14,6 +14,8 @@ ALLOWED_EXTENSIONS = {
     ".pdf",
     ".docx",
     ".txt",
+    ".csv",
+    ".xlsx",
 }
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -86,10 +88,10 @@ async def generate_study(
             if extension not in ALLOWED_EXTENSIONS:
                 raise HTTPException(
                     status_code=400,
-                    detail=(
-                        "TextileAI hiện hỗ trợ "
-                        "PDF, DOCX và TXT."
-                    ),
+                   detail=(
+    "TextileAI hiện hỗ trợ "
+    "PDF, DOCX, TXT, CSV và XLSX."
+),
                 )
 
             # Đọc file
