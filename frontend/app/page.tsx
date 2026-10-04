@@ -14,12 +14,21 @@ type KPI = {
   description: string;
 };
 
-type MachinePerformance = {
-  machine: string;
+type PerformanceItem = {
+  product?: string;
+  model?: string;
+  component?: string;
+  supplier?: string;
+  batch?: string;
   production: number;
   defects: number;
   defect_rate: number;
   downtime: number;
+};
+
+type DefectTypeAnalysis = {
+  defect_type: string;
+  defects: number;
 };
 
 type DailyProduction = {
@@ -31,13 +40,19 @@ type DailyProduction = {
 };
 
 type DataScope = {
-  has_machine_data: boolean;
+  has_product_data: boolean;
+  has_model_data: boolean;
+  has_component_data: boolean;
+  has_supplier_data: boolean;
+  has_batch_data: boolean;
+  has_defect_type_data: boolean;
+  has_quality_status_data: boolean;
   has_defect_data: boolean;
   has_downtime_data: boolean;
   has_date_data: boolean;
 };
 
-type ProductionResult = {
+type HardwareResult = {
   title: string;
   summary: string;
 
@@ -47,7 +62,14 @@ type ProductionResult = {
   warnings: string[];
   recommendations: string[];
 
-  machine_performance: MachinePerformance[];
+  product_performance: PerformanceItem[];
+  model_performance: PerformanceItem[];
+  component_performance: PerformanceItem[];
+  supplier_performance: PerformanceItem[];
+  batch_performance: PerformanceItem[];
+
+  defect_type_analysis: DefectTypeAnalysis[];
+
   daily_production: DailyProduction[];
 
   data_scope: DataScope;
@@ -58,7 +80,7 @@ export default function Home() {
     useState<File | null>(null);
 
   const [result, setResult] =
-    useState<ProductionResult | null>(null);
+    useState<HardwareResult | null>(null);
 
   const [loading, setLoading] =
     useState(false);
@@ -147,7 +169,7 @@ export default function Home() {
 
       const response =
         await fetch(
-          "http://127.0.0.1:8000/api/production/analyze",
+          "http://127.0.0.1:8000/api/hardware/analyze",
           {
             method: "POST",
             body: formData,
@@ -156,7 +178,7 @@ export default function Home() {
 
       if (!response.ok) {
         let message =
-          "Không thể phân tích dữ liệu sản xuất.";
+          "Không thể phân tích dữ liệu phần cứng.";
 
         try {
           const data =
@@ -172,7 +194,7 @@ export default function Home() {
         throw new Error(message);
       }
 
-      const data: ProductionResult =
+      const data: HardwareResult =
         await response.json();
 
       setResult(data);
@@ -187,7 +209,6 @@ export default function Home() {
             block: "start",
           });
       }, 100);
-
     } catch (error) {
       console.error(error);
 
@@ -214,7 +235,7 @@ export default function Home() {
 
     const input =
       document.getElementById(
-        "production-file"
+        "hardware-file"
       ) as HTMLInputElement | null;
 
     if (input) {
@@ -247,8 +268,8 @@ export default function Home() {
       "Tổng thời gian dừng máy"
     );
 
-  const machineCount =
-    getKPI("Số lượng máy");
+  const productCount =
+    getKPI("Số lượng sản phẩm");
 
   // --------------------------------
   // Chart
@@ -288,14 +309,14 @@ export default function Home() {
           <div className="dashboard-brand">
 
             <div className="brand-mark">
-              TX
+              HW
             </div>
 
             <div>
-              <h1>TextileAI</h1>
+              <h1>HardwareAI</h1>
 
               <span>
-                Production Intelligence
+                Hardware Intelligence
               </span>
             </div>
 
@@ -319,11 +340,11 @@ export default function Home() {
         <section className="dashboard-hero">
 
           <div className="hero-badge">
-            AI Production Analytics
+            AI Hardware Analytics
           </div>
 
           <h2>
-            Understand your production
+            Understand your hardware
             <br />
             with{" "}
             <span>
@@ -332,11 +353,12 @@ export default function Home() {
           </h2>
 
           <p>
-            Upload dữ liệu sản xuất từ
-            CSV hoặc Excel. TextileAI sẽ
-            tính toán KPI, phân tích theo
-            máy và theo ngày, sau đó tạo
-            các nhận định bằng AI.
+            Upload dữ liệu sản xuất phần cứng
+            từ CSV hoặc Excel. HardwareAI sẽ
+            tính toán KPI, phân tích sản phẩm,
+            model, linh kiện, nhà cung cấp,
+            lô sản xuất và tạo các nhận định
+            bằng AI.
           </p>
 
         </section>
@@ -359,11 +381,11 @@ export default function Home() {
               <div>
 
                 <h3>
-                  Production data
+                  Hardware data
                 </h3>
 
                 <p>
-                  Upload dữ liệu sản xuất
+                  Upload dữ liệu phần cứng
                   để bắt đầu phân tích.
                 </p>
 
@@ -389,7 +411,7 @@ export default function Home() {
           >
 
             <label
-              htmlFor="production-file"
+              htmlFor="hardware-file"
               className="production-upload"
             >
 
@@ -400,7 +422,7 @@ export default function Home() {
               <div>
 
                 <strong>
-                  Upload production data
+                  Upload hardware data
                 </strong>
 
                 <span>
@@ -412,7 +434,7 @@ export default function Home() {
             </label>
 
             <input
-              id="production-file"
+              id="hardware-file"
               type="file"
               accept=".csv,.xlsx"
               onChange={
@@ -476,7 +498,7 @@ export default function Home() {
                   AI
                 </span>
 
-                KPI · Quality · Downtime · Insights
+                KPI · Quality · Components · Suppliers · Insights
 
               </div>
 
@@ -489,11 +511,13 @@ export default function Home() {
                 {loading ? (
                   <>
                     <span className="spinner" />
+
                     Analyzing...
                   </>
                 ) : (
                   <>
-                    Analyze production
+                    Analyze hardware
+
                     <span>
                       →
                     </span>
@@ -525,12 +549,12 @@ export default function Home() {
             </div>
 
             <h3>
-              TextileAI is analyzing production data
+              HardwareAI is analyzing hardware data
             </h3>
 
             <p>
               Calculating KPIs and generating
-              production insights...
+              hardware intelligence...
             </p>
 
           </section>
@@ -554,7 +578,7 @@ export default function Home() {
               <div>
 
                 <div className="result-label">
-                  PRODUCTION ANALYSIS
+                  HARDWARE ANALYSIS
                 </div>
 
                 <h2>
@@ -614,7 +638,10 @@ export default function Home() {
                       ).toFixed(2)
                     : "--"
                 }
-                unit="%"
+                unit={
+                  defectRate?.unit ||
+                  "%"
+                }
               />
 
               <KPICard
@@ -635,17 +662,17 @@ export default function Home() {
               />
 
               <KPICard
-                label="Số lượng máy"
+                label="Số sản phẩm"
                 value={
-                  machineCount
+                  productCount
                     ? Number(
-                        machineCount.value
+                        productCount.value
                       ).toString()
                     : "--"
                 }
                 unit={
-                  machineCount?.unit ||
-                  "máy"
+                  productCount?.unit ||
+                  "sản phẩm"
                 }
               />
 
@@ -740,10 +767,100 @@ export default function Home() {
 
 
             {/* -------------------------------- */}
-            {/* Machines */}
+            {/* Product */}
             {/* -------------------------------- */}
 
-            {result.machine_performance.length >
+            {result.product_performance.length >
+              0 && (
+              <PerformanceTable
+                number="02"
+                title="Phân tích theo sản phẩm"
+                subtitle="Product performance"
+                items={
+                  result.product_performance
+                }
+                field="product"
+              />
+            )}
+
+
+            {/* -------------------------------- */}
+            {/* Model */}
+            {/* -------------------------------- */}
+
+            {result.model_performance.length >
+              0 && (
+              <PerformanceTable
+                number="03"
+                title="Phân tích theo model"
+                subtitle="Model performance"
+                items={
+                  result.model_performance
+                }
+                field="model"
+              />
+            )}
+
+
+            {/* -------------------------------- */}
+            {/* Component */}
+            {/* -------------------------------- */}
+
+            {result.component_performance.length >
+              0 && (
+              <PerformanceTable
+                number="04"
+                title="Phân tích theo linh kiện"
+                subtitle="Component performance"
+                items={
+                  result.component_performance
+                }
+                field="component"
+              />
+            )}
+
+
+            {/* -------------------------------- */}
+            {/* Supplier */}
+            {/* -------------------------------- */}
+
+            {result.supplier_performance.length >
+              0 && (
+              <PerformanceTable
+                number="05"
+                title="Phân tích theo nhà cung cấp"
+                subtitle="Supplier performance"
+                items={
+                  result.supplier_performance
+                }
+                field="supplier"
+              />
+            )}
+
+
+            {/* -------------------------------- */}
+            {/* Batch */}
+            {/* -------------------------------- */}
+
+            {result.batch_performance.length >
+              0 && (
+              <PerformanceTable
+                number="06"
+                title="Phân tích theo lô sản xuất"
+                subtitle="Batch performance"
+                items={
+                  result.batch_performance
+                }
+                field="batch"
+              />
+            )}
+
+
+            {/* -------------------------------- */}
+            {/* Defect types */}
+            {/* -------------------------------- */}
+
+            {result.defect_type_analysis.length >
               0 && (
               <section className="dashboard-card">
 
@@ -752,17 +869,17 @@ export default function Home() {
                   <div>
 
                     <span>
-                      02
+                      07
                     </span>
 
                     <h3>
-                      Phân tích theo máy
+                      Phân tích loại lỗi
                     </h3>
 
                   </div>
 
                   <p>
-                    Machine performance
+                    Defect type analysis
                   </p>
 
                 </div>
@@ -777,23 +894,11 @@ export default function Home() {
                       <tr>
 
                         <th>
-                          Machine
-                        </th>
-
-                        <th>
-                          Production
+                          Defect type
                         </th>
 
                         <th>
                           Defects
-                        </th>
-
-                        <th>
-                          Defect rate
-                        </th>
-
-                        <th>
-                          Downtime
                         </th>
 
                       </tr>
@@ -802,48 +907,26 @@ export default function Home() {
 
                     <tbody>
 
-                      {result.machine_performance.map(
-                        (machine) => (
+                      {result.defect_type_analysis.map(
+                        (item) => (
                           <tr
                             key={
-                              machine.machine
+                              item.defect_type
                             }
                           >
 
                             <td>
                               <strong>
-                                {machine.machine}
+                                {
+                                  item.defect_type
+                                }
                               </strong>
                             </td>
 
                             <td>
-                              {machine.production.toLocaleString(
+                              {item.defects.toLocaleString(
                                 "vi-VN"
                               )}
-                            </td>
-
-                            <td>
-                              {machine.defects.toLocaleString(
-                                "vi-VN"
-                              )}
-                            </td>
-
-                            <td>
-
-                              <span className="rate-value">
-                                {machine.defect_rate.toFixed(
-                                  2
-                                )}
-                                %
-                              </span>
-
-                            </td>
-
-                            <td>
-                              {
-                                machine.downtime
-                              }{" "}
-                              phút
                             </td>
 
                           </tr>
@@ -867,7 +950,7 @@ export default function Home() {
             <section className="ai-grid">
 
               <AISection
-                number="03"
+                number="08"
                 title="AI Insights"
                 items={
                   result.insights
@@ -876,7 +959,7 @@ export default function Home() {
               />
 
               <AISection
-                number="04"
+                number="09"
                 title="Warnings"
                 items={
                   result.warnings
@@ -892,7 +975,7 @@ export default function Home() {
             {/* -------------------------------- */}
 
             <AISection
-              number="05"
+              number="10"
               title="AI Recommendations"
               items={
                 result.recommendations
@@ -908,7 +991,7 @@ export default function Home() {
             <div className="dashboard-footer">
 
               <span>
-                Generated by TextileAI
+                Generated by HardwareAI
               </span>
 
               <button
@@ -969,6 +1052,155 @@ function KPICard({
 
 
 /* -------------------------------- */
+/* Performance Table */
+/* -------------------------------- */
+
+function PerformanceTable({
+  number,
+  title,
+  subtitle,
+  items,
+  field,
+}: {
+  number: string;
+  title: string;
+  subtitle: string;
+  items: PerformanceItem[];
+  field:
+    | "product"
+    | "model"
+    | "component"
+    | "supplier"
+    | "batch";
+}) {
+  return (
+    <section className="dashboard-card">
+
+      <div className="dashboard-card-header">
+
+        <div>
+
+          <span>
+            {number}
+          </span>
+
+          <h3>
+            {title}
+          </h3>
+
+        </div>
+
+        <p>
+          {subtitle}
+        </p>
+
+      </div>
+
+
+      <div className="machine-table-wrapper">
+
+        <table className="machine-table">
+
+          <thead>
+
+            <tr>
+
+              <th>
+                {getFieldLabel(field)}
+              </th>
+
+              <th>
+                Production
+              </th>
+
+              <th>
+                Defects
+              </th>
+
+              <th>
+                Defect rate
+              </th>
+
+              <th>
+                Downtime
+              </th>
+
+            </tr>
+
+          </thead>
+
+          <tbody>
+
+            {items.map(
+              (item, index) => (
+
+                <tr
+                  key={
+                    String(
+                      item[field] ??
+                      index
+                    )
+                  }
+                >
+
+                  <td>
+
+                    <strong>
+                      {String(
+                        item[field] ??
+                        "N/A"
+                      )}
+                    </strong>
+
+                  </td>
+
+                  <td>
+                    {item.production.toLocaleString(
+                      "vi-VN"
+                    )}
+                  </td>
+
+                  <td>
+                    {item.defects.toLocaleString(
+                      "vi-VN"
+                    )}
+                  </td>
+
+                  <td>
+
+                    <span className="rate-value">
+                      {item.defect_rate.toFixed(
+                        2
+                      )}
+                      %
+                    </span>
+
+                  </td>
+
+                  <td>
+                    {item.downtime.toLocaleString(
+                      "vi-VN"
+                    )}{" "}
+                    phút
+                  </td>
+
+                </tr>
+
+              )
+            )}
+
+          </tbody>
+
+        </table>
+
+      </div>
+
+    </section>
+  );
+}
+
+
+/* -------------------------------- */
 /* AI Section */
 /* -------------------------------- */
 
@@ -1014,6 +1246,7 @@ function AISection({
 
           {items.map(
             (item, index) => (
+
               <div
                 className="ai-item"
                 key={index}
@@ -1030,6 +1263,7 @@ function AISection({
                 </p>
 
               </div>
+
             )
           )}
 
@@ -1044,6 +1278,36 @@ function AISection({
 /* -------------------------------- */
 /* Helpers */
 /* -------------------------------- */
+
+function getFieldLabel(
+  field:
+    | "product"
+    | "model"
+    | "component"
+    | "supplier"
+    | "batch"
+) {
+  switch (field) {
+    case "product":
+      return "Product";
+
+    case "model":
+      return "Model";
+
+    case "component":
+      return "Component";
+
+    case "supplier":
+      return "Supplier";
+
+    case "batch":
+      return "Batch";
+
+    default:
+      return "Item";
+  }
+}
+
 
 function formatDate(
   date: string
