@@ -1,3 +1,4 @@
+
 "use client";
 
 import {
@@ -273,20 +274,43 @@ export default function Home() {
     );
   };
 
+  const getKPIByNames = (
+    names: string[]
+  ) => {
+    if (!result) {
+      return undefined;
+    }
+
+    return result.kpis.find(
+      (kpi) =>
+        names.includes(kpi.name)
+    );
+  };
+
   const totalProduction =
-    getKPI("Tổng sản lượng");
+    getKPIByNames([
+      "Tổng sản lượng",
+    ]);
 
   const defectRate =
-    getKPI("Tỷ lệ lỗi tổng thể") ||
-    getKPI("Tỷ lệ lỗi");
+    getKPIByNames([
+      "Tỷ lệ lỗi chung",
+      "Tỷ lệ lỗi tổng thể",
+      "Tỷ lệ lỗi",
+    ]);
 
   const totalDowntime =
-    getKPI(
-      "Tổng thời gian dừng máy"
-    );
+    getKPIByNames([
+      "Tổng downtime",
+      "Tổng thời gian dừng máy",
+      "Tổng thời gian ngừng máy",
+    ]);
 
   const productCount =
-    getKPI("Số lượng sản phẩm");
+    getKPIByNames([
+      "Số lượng sản phẩm",
+      "Số sản phẩm",
+    ]);
 
   // --------------------------------
   // Chart
@@ -350,6 +374,7 @@ export default function Home() {
         </header>
 
 
+
         {/* -------------------------------- */}
         {/* Hero */}
         {/* -------------------------------- */}
@@ -379,6 +404,7 @@ export default function Home() {
           </p>
 
         </section>
+
 
 
         {/* -------------------------------- */}
@@ -423,6 +449,7 @@ export default function Home() {
           </div>
 
 
+
           <form
             onSubmit={handleSubmit}
           >
@@ -461,6 +488,7 @@ export default function Home() {
             />
 
 
+
             {selectedFile && (
               <div className="selected-production-file">
 
@@ -492,6 +520,7 @@ export default function Home() {
             )}
 
 
+
             {error && (
               <div className="error-box">
 
@@ -505,6 +534,7 @@ export default function Home() {
 
               </div>
             )}
+
 
 
             <div className="upload-footer">
@@ -550,6 +580,7 @@ export default function Home() {
         </section>
 
 
+
         {/* -------------------------------- */}
         {/* Loading */}
         {/* -------------------------------- */}
@@ -576,6 +607,7 @@ export default function Home() {
 
           </section>
         )}
+
 
 
         {/* -------------------------------- */}
@@ -621,6 +653,7 @@ export default function Home() {
               </div>
 
             </div>
+
 
 
             {/* -------------------------------- */}
@@ -696,6 +729,7 @@ export default function Home() {
             </section>
 
 
+
             {/* -------------------------------- */}
             {/* Data Quality */}
             {/* -------------------------------- */}
@@ -705,6 +739,7 @@ export default function Home() {
                 result.data_quality
               }
             />
+
 
 
             {/* -------------------------------- */}
@@ -720,7 +755,7 @@ export default function Home() {
                   <div>
 
                     <span>
-                      02
+                      03
                     </span>
 
                     <h3>
@@ -734,6 +769,7 @@ export default function Home() {
                   </p>
 
                 </div>
+
 
 
                 <div className="daily-chart">
@@ -794,6 +830,7 @@ export default function Home() {
             )}
 
 
+
             {/* -------------------------------- */}
             {/* Product */}
             {/* -------------------------------- */}
@@ -801,7 +838,7 @@ export default function Home() {
             {result.product_performance.length >
               0 && (
               <PerformanceTable
-                number="03"
+                number="04"
                 title="Phân tích theo sản phẩm"
                 subtitle="Product performance"
                 items={
@@ -812,6 +849,7 @@ export default function Home() {
             )}
 
 
+
             {/* -------------------------------- */}
             {/* Model */}
             {/* -------------------------------- */}
@@ -819,7 +857,7 @@ export default function Home() {
             {result.model_performance.length >
               0 && (
               <PerformanceTable
-                number="04"
+                number="05"
                 title="Phân tích theo model"
                 subtitle="Model performance"
                 items={
@@ -830,6 +868,7 @@ export default function Home() {
             )}
 
 
+
             {/* -------------------------------- */}
             {/* Component */}
             {/* -------------------------------- */}
@@ -837,7 +876,7 @@ export default function Home() {
             {result.component_performance.length >
               0 && (
               <PerformanceTable
-                number="05"
+                number="06"
                 title="Phân tích theo linh kiện"
                 subtitle="Component performance"
                 items={
@@ -848,6 +887,7 @@ export default function Home() {
             )}
 
 
+
             {/* -------------------------------- */}
             {/* Supplier */}
             {/* -------------------------------- */}
@@ -855,7 +895,7 @@ export default function Home() {
             {result.supplier_performance.length >
               0 && (
               <PerformanceTable
-                number="06"
+                number="07"
                 title="Phân tích theo nhà cung cấp"
                 subtitle="Supplier performance"
                 items={
@@ -866,6 +906,7 @@ export default function Home() {
             )}
 
 
+
             {/* -------------------------------- */}
             {/* Batch */}
             {/* -------------------------------- */}
@@ -873,7 +914,7 @@ export default function Home() {
             {result.batch_performance.length >
               0 && (
               <PerformanceTable
-                number="07"
+                number="08"
                 title="Phân tích theo lô sản xuất"
                 subtitle="Batch performance"
                 items={
@@ -882,6 +923,7 @@ export default function Home() {
                 field="batch"
               />
             )}
+
 
 
             {/* -------------------------------- */}
@@ -897,7 +939,7 @@ export default function Home() {
                   <div>
 
                     <span>
-                      08
+                      09
                     </span>
 
                     <h3>
@@ -911,6 +953,7 @@ export default function Home() {
                   </p>
 
                 </div>
+
 
 
                 <div className="machine-table-wrapper">
@@ -971,6 +1014,7 @@ export default function Home() {
             )}
 
 
+
             {/* -------------------------------- */}
             {/* AI Insights */}
             {/* -------------------------------- */}
@@ -978,7 +1022,7 @@ export default function Home() {
             <section className="ai-grid">
 
               <AISection
-                number="09"
+                number="10"
                 title="AI Insights"
                 items={
                   result.insights
@@ -987,7 +1031,7 @@ export default function Home() {
               />
 
               <AISection
-                number="10"
+                number="11"
                 title="Warnings"
                 items={
                   result.warnings
@@ -998,18 +1042,20 @@ export default function Home() {
             </section>
 
 
+
             {/* -------------------------------- */}
             {/* Recommendations */}
             {/* -------------------------------- */}
 
             <AISection
-              number="11"
+              number="12"
               title="AI Recommendations"
               items={
                 result.recommendations
               }
               className="recommendations"
             />
+
 
 
             {/* -------------------------------- */}
@@ -1046,6 +1092,7 @@ export default function Home() {
 }
 
 
+
 /* -------------------------------- */
 /* KPI Card */
 /* -------------------------------- */
@@ -1077,6 +1124,7 @@ function KPICard({
     </div>
   );
 }
+
 
 
 /* -------------------------------- */
@@ -1139,7 +1187,11 @@ function DataQualityCard({
     ).length > 0 ||
     Object.keys(
       dataQuality.negative_values || {}
-    ).length > 0;
+    ).length > 0 ||
+    (
+      dataQuality.missing_columns &&
+      dataQuality.missing_columns.length > 0
+    );
 
   const issueMessages: string[] = [];
 
@@ -1222,6 +1274,7 @@ function DataQualityCard({
       </div>
 
 
+
       <div className="data-quality-main">
 
         <div className="quality-score">
@@ -1253,6 +1306,7 @@ function DataQualityCard({
       </div>
 
 
+
       <div className="quality-stats">
 
         <QualityStat
@@ -1280,6 +1334,7 @@ function DataQualityCard({
       </div>
 
 
+
       {hasProblems && (
         <div className="quality-issues">
 
@@ -1297,6 +1352,7 @@ function DataQualityCard({
                     className="quality-issue"
                     key={`${message}-${index}`}
                   >
+
                     <span>
                       {String(
                         index + 1
@@ -1306,6 +1362,7 @@ function DataQualityCard({
                     <p>
                       {message}
                     </p>
+
                   </div>
                 )
               )}
@@ -1336,6 +1393,7 @@ function DataQualityCard({
 }
 
 
+
 /* -------------------------------- */
 /* Quality Stat */
 /* -------------------------------- */
@@ -1363,6 +1421,7 @@ function QualityStat({
     </div>
   );
 }
+
 
 
 /* -------------------------------- */
@@ -1409,6 +1468,7 @@ function PerformanceTable({
         </p>
 
       </div>
+
 
 
       <div className="machine-table-wrapper">
@@ -1514,6 +1574,7 @@ function PerformanceTable({
 }
 
 
+
 /* -------------------------------- */
 /* AI Section */
 /* -------------------------------- */
@@ -1549,6 +1610,7 @@ function AISection({
         </div>
 
       </div>
+
 
 
       {items.length === 0 ? (
@@ -1589,6 +1651,7 @@ function AISection({
 }
 
 
+
 /* -------------------------------- */
 /* Helpers */
 /* -------------------------------- */
@@ -1621,6 +1684,7 @@ function getFieldLabel(
       return "Item";
   }
 }
+
 
 
 function formatDate(

@@ -51,8 +51,8 @@ async def analyze_hardware(
         # =================================================
 
         if extension == ".csv":
-
             dataframe = None
+            last_error = None
 
             encodings = [
                 "utf-8-sig",
@@ -61,18 +61,142 @@ async def analyze_hardware(
                 "latin-1",
             ]
 
-            last_error = None
-
             for encoding in encodings:
                 try:
-                    dataframe = pd.read_csv(
-                        io.BytesIO(content),
-                        encoding=encoding,
+                    text = content.decode(
+                        encoding,
+                        errors="strict",
                     )
+
+                    lines = [
+                        line.strip()
+                        for line in text.splitlines()
+                        if line.strip()
+                    ]
+
+                    if not lines:
+                        raise ValueError(
+                            "File CSV không có dữ liệu."
+                        )
+
+                    # ==========================================
+                    # Detect delimiter
+                    # ==========================================
+
+                    raw_header = lines[0]
+
+                    comma_count = raw_header.count(",")
+                    semicolon_count = raw_header.count(";")
+
+                    if semicolon_count > comma_count:
+                        delimiter = ";"
+                    else:
+                        delimiter = ","
+
+                    print("========================================")
+                    print("CSV ENCODING:", encoding)
+                    print("CSV DELIMITER:", repr(delimiter))
+                    print("CSV HEADER:", raw_header)
+                    print("========================================")
+
+                    # ==========================================
+                    # Clean header
+                    # ==========================================
+
+                    header = raw_header.strip()
+
+                    if (
+                        header.startswith('"')
+                        and header.endswith('"')
+                    ):
+                        header = header[1:-1]
+
+                    columns = [
+                        column.strip().strip('"').strip("'")
+                        for column in header.split(delimiter)
+                    ]
+
+                    print("DETECTED COLUMNS:")
+                    print(columns)
+
+                    # ==========================================
+                    # Parse rows manually
+                    # ==========================================
+
+                    rows = []
+
+                    for line_number, line in enumerate(
+                        lines[1:],
+                        start=2,
+                    ):
+                        cleaned_line = line.strip()
+
+                        if (
+                            cleaned_line.startswith('"')
+                            and cleaned_line.endswith('"')
+                        ):
+                            cleaned_line = cleaned_line[1:-1]
+
+                        values = [
+                            value.strip().strip('"').strip("'")
+                            for value in cleaned_line.split(delimiter)
+                        ]
+
+                        if len(values) != len(columns):
+                            print(
+                                f"CSV WARNING: line {line_number} "
+                                f"has {len(values)} columns, "
+                                f"expected {len(columns)}"
+                            )
+
+                            if len(values) < len(columns):
+                                values.extend(
+                                    [None] * (len(columns) - len(values))
+                                )
+                            else:
+                                values = values[:len(columns)]
+
+                        rows.append(values)
+
+                    # ==========================================
+                    # Create DataFrame
+                    # ==========================================
+
+                    dataframe = pd.DataFrame(
+                        rows,
+                        columns=columns,
+                    )
+
+                    # ==========================================
+                    # Clean column names
+                    # ==========================================
+
+                    dataframe.columns = (
+                        dataframe.columns
+                        .astype(str)
+                        .str.strip()
+                    )
+
+                    # ==========================================
+                    # Debug
+                    # ==========================================
+
+                    print("CSV COLUMNS:")
+                    print(dataframe.columns.tolist())
+                    print("CSV ROWS:", len(dataframe))
+                    print("CSV PREVIEW:")
+                    print(dataframe.head().to_string())
+                    if not dataframe.empty:
+                        print("CSV FIRST ROW:")
+                        print(dataframe.iloc[0].to_dict())
+
+                    print("========================================")
+
                     break
 
                 except Exception as error:
                     last_error = error
+                    dataframe = None
 
             if dataframe is None:
                 raise last_error or ValueError(
@@ -237,10 +361,14 @@ async def analyze_hardware(
             )
         )
 
+        # -------------------------------------------------
+        # Data Quality
+        # -------------------------------------------------
+
         response["data_quality"] = (
             kpis.get(
                 "data_quality",
-                {},
+                {}
             )
         )
 
@@ -251,14 +379,16 @@ async def analyze_hardware(
 
     except Exception as error:
 
-        print(
-            "Hardware analysis error:",
-            repr(error),
-        )
+        import traceback
+
+        print("========================================")
+        print("HARDWARE ANALYSIS ERROR")
+        print("========================================")
+        print("Error:", repr(error))
+        traceback.print_exc()
+        print("========================================")
 
         raise HTTPException(
             status_code=500,
-            detail=(
-                "Không thể phân tích dữ liệu phần cứng."
-            ),
+            detail=str(error),
         )
