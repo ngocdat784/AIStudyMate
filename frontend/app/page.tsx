@@ -52,6 +52,21 @@ type DataScope = {
   has_date_data: boolean;
 };
 
+type DataQuality = {
+  quality_score: number;
+  total_rows: number;
+  data_rows: number;
+  valid_rows: number;
+  invalid_rows: number;
+  empty_rows: number;
+  duplicate_rows: number;
+  missing_values: Record<string, number>;
+  invalid_values: Record<string, number>;
+  negative_values: Record<string, number>;
+  missing_columns: string[];
+  warnings: string[];
+};
+
 type HardwareResult = {
   title: string;
   summary: string;
@@ -73,6 +88,8 @@ type HardwareResult = {
   daily_production: DailyProduction[];
 
   data_scope: DataScope;
+
+  data_quality: DataQuality;
 };
 
 export default function Home() {
@@ -680,6 +697,17 @@ export default function Home() {
 
 
             {/* -------------------------------- */}
+            {/* Data Quality */}
+            {/* -------------------------------- */}
+
+            <DataQualityCard
+              dataQuality={
+                result.data_quality
+              }
+            />
+
+
+            {/* -------------------------------- */}
             {/* Daily production */}
             {/* -------------------------------- */}
 
@@ -692,7 +720,7 @@ export default function Home() {
                   <div>
 
                     <span>
-                      01
+                      02
                     </span>
 
                     <h3>
@@ -773,7 +801,7 @@ export default function Home() {
             {result.product_performance.length >
               0 && (
               <PerformanceTable
-                number="02"
+                number="03"
                 title="Phân tích theo sản phẩm"
                 subtitle="Product performance"
                 items={
@@ -791,7 +819,7 @@ export default function Home() {
             {result.model_performance.length >
               0 && (
               <PerformanceTable
-                number="03"
+                number="04"
                 title="Phân tích theo model"
                 subtitle="Model performance"
                 items={
@@ -809,7 +837,7 @@ export default function Home() {
             {result.component_performance.length >
               0 && (
               <PerformanceTable
-                number="04"
+                number="05"
                 title="Phân tích theo linh kiện"
                 subtitle="Component performance"
                 items={
@@ -827,7 +855,7 @@ export default function Home() {
             {result.supplier_performance.length >
               0 && (
               <PerformanceTable
-                number="05"
+                number="06"
                 title="Phân tích theo nhà cung cấp"
                 subtitle="Supplier performance"
                 items={
@@ -845,7 +873,7 @@ export default function Home() {
             {result.batch_performance.length >
               0 && (
               <PerformanceTable
-                number="06"
+                number="07"
                 title="Phân tích theo lô sản xuất"
                 subtitle="Batch performance"
                 items={
@@ -869,7 +897,7 @@ export default function Home() {
                   <div>
 
                     <span>
-                      07
+                      08
                     </span>
 
                     <h3>
@@ -950,7 +978,7 @@ export default function Home() {
             <section className="ai-grid">
 
               <AISection
-                number="08"
+                number="09"
                 title="AI Insights"
                 items={
                   result.insights
@@ -959,7 +987,7 @@ export default function Home() {
               />
 
               <AISection
-                number="09"
+                number="10"
                 title="Warnings"
                 items={
                   result.warnings
@@ -975,7 +1003,7 @@ export default function Home() {
             {/* -------------------------------- */}
 
             <AISection
-              number="10"
+              number="11"
               title="AI Recommendations"
               items={
                 result.recommendations
@@ -1045,6 +1073,292 @@ function KPICard({
       <span className="kpi-unit">
         {unit}
       </span>
+
+    </div>
+  );
+}
+
+
+/* -------------------------------- */
+/* Data Quality Card */
+/* -------------------------------- */
+
+function DataQualityCard({
+  dataQuality,
+}: {
+  dataQuality: DataQuality;
+}) {
+  const score =
+    Number(
+      dataQuality?.quality_score ?? 0
+    );
+
+  const getQualityStatus = () => {
+    if (score >= 95) {
+      return {
+        label: "Excellent Quality",
+        className: "quality-excellent",
+      };
+    }
+
+    if (score >= 85) {
+      return {
+        label: "Good Quality",
+        className: "quality-good",
+      };
+    }
+
+    if (score >= 70) {
+      return {
+        label: "Needs Review",
+        className: "quality-review",
+      };
+    }
+
+    return {
+      label: "Poor Quality",
+      className: "quality-poor",
+    };
+  };
+
+  const qualityStatus =
+    getQualityStatus();
+
+  const totalIssues =
+    dataQuality.invalid_rows +
+    dataQuality.empty_rows +
+    dataQuality.duplicate_rows;
+
+  const hasProblems =
+    totalIssues > 0 ||
+    Object.keys(
+      dataQuality.missing_values || {}
+    ).length > 0 ||
+    Object.keys(
+      dataQuality.invalid_values || {}
+    ).length > 0 ||
+    Object.keys(
+      dataQuality.negative_values || {}
+    ).length > 0;
+
+  const issueMessages: string[] = [];
+
+  Object.entries(
+    dataQuality.missing_values || {}
+  ).forEach(
+    ([field, count]) => {
+      issueMessages.push(
+        `Thiếu ${count} giá trị ở trường '${field}'.`
+      );
+    }
+  );
+
+  Object.entries(
+    dataQuality.invalid_values || {}
+  ).forEach(
+    ([field, count]) => {
+      issueMessages.push(
+        `Có ${count} giá trị không hợp lệ ở trường '${field}'.`
+      );
+    }
+  );
+
+  Object.entries(
+    dataQuality.negative_values || {}
+  ).forEach(
+    ([field, count]) => {
+      issueMessages.push(
+        `Có ${count} giá trị âm ở trường '${field}'.`
+      );
+    }
+  );
+
+  if (dataQuality.empty_rows > 0) {
+    issueMessages.push(
+      `Có ${dataQuality.empty_rows} dòng trống.`
+    );
+  }
+
+  if (dataQuality.duplicate_rows > 0) {
+    issueMessages.push(
+      `Có ${dataQuality.duplicate_rows} dòng trùng lặp.`
+    );
+  }
+
+  if (
+    dataQuality.missing_columns &&
+    dataQuality.missing_columns.length > 0
+  ) {
+    issueMessages.push(
+      `Thiếu cột: ${dataQuality.missing_columns.join(
+        ", "
+      )}.`
+    );
+  }
+
+  return (
+    <section
+      className={`dashboard-card data-quality-card ${qualityStatus.className}`}
+    >
+
+      <div className="dashboard-card-header">
+
+        <div>
+
+          <span>
+            02
+          </span>
+
+          <h3>
+            Data Quality
+          </h3>
+
+        </div>
+
+        <p>
+          Dataset validation
+        </p>
+
+      </div>
+
+
+      <div className="data-quality-main">
+
+        <div className="quality-score">
+
+          <div className="quality-score-number">
+            {score.toFixed(0)}
+          </div>
+
+          <div className="quality-score-total">
+            / 100
+          </div>
+
+        </div>
+
+        <div className="quality-status">
+
+          <strong>
+            {qualityStatus.label}
+          </strong>
+
+          <span>
+            {hasProblems
+              ? "Data quality issues detected"
+              : "No data quality issues detected"}
+          </span>
+
+        </div>
+
+      </div>
+
+
+      <div className="quality-stats">
+
+        <QualityStat
+          label="Records"
+          value={dataQuality.total_rows}
+        />
+
+        <QualityStat
+          label="Valid"
+          value={dataQuality.valid_rows}
+        />
+
+        <QualityStat
+          label="Invalid"
+          value={dataQuality.invalid_rows}
+        />
+
+        <QualityStat
+          label="Warnings"
+          value={
+            dataQuality.warnings?.length ?? 0
+          }
+        />
+
+      </div>
+
+
+      {hasProblems && (
+        <div className="quality-issues">
+
+          <div className="quality-issues-title">
+            Issues detected
+          </div>
+
+          <div className="quality-issues-list">
+
+            {issueMessages
+              .slice(0, 10)
+              .map(
+                (message, index) => (
+                  <div
+                    className="quality-issue"
+                    key={`${message}-${index}`}
+                  >
+                    <span>
+                      {String(
+                        index + 1
+                      ).padStart(2, "0")}
+                    </span>
+
+                    <p>
+                      {message}
+                    </p>
+                  </div>
+                )
+              )}
+
+          </div>
+
+        </div>
+      )}
+
+      {!hasProblems && (
+        <div className="quality-success">
+
+          <strong>
+            Dataset is ready for analysis.
+          </strong>
+
+          <span>
+            {dataQuality.valid_rows} /{" "}
+            {dataQuality.total_rows} records
+            passed the data quality check.
+          </span>
+
+        </div>
+      )}
+
+    </section>
+  );
+}
+
+
+/* -------------------------------- */
+/* Quality Stat */
+/* -------------------------------- */
+
+function QualityStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="quality-stat">
+
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value.toLocaleString(
+          "vi-VN"
+        )}
+      </strong>
 
     </div>
   );

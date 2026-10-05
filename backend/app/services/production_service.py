@@ -55,9 +55,26 @@ class ProductionAnalysis(BaseModel):
 # Gemini
 # =========================================================
 
-client = genai.Client(
-    api_key=settings.GEMINI_API_KEY
-)
+client = None
+
+
+def get_client() -> Any:
+    global client
+
+    if client is None:
+        api_key = settings.GEMINI_API_KEY
+
+        if not api_key:
+            raise ValueError(
+                "GEMINI_API_KEY chưa được cấu hình. "
+                "Vui lòng thêm biến môi trường hoặc file .env."
+            )
+
+        client = genai.Client(
+            api_key=api_key,
+        )
+
+    return client
 
 
 SYSTEM_INSTRUCTION = """
@@ -1016,7 +1033,7 @@ Recommendations = hành động nên xem xét.
 Chỉ trả về JSON đúng với schema.
 """
 
-    interaction = client.interactions.create(
+    interaction = get_client().interactions.create(
         model=GEMINI_MODEL,
         input=(
             SYSTEM_INSTRUCTION

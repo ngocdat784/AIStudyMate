@@ -53,9 +53,26 @@ class StudyMaterial(BaseModel):
 # Gemini Client
 # =========================================================
 
-client = genai.Client(
-    api_key=settings.GEMINI_API_KEY
-)
+client = None
+
+
+def get_client() -> Any:
+    global client
+
+    if client is None:
+        api_key = settings.GEMINI_API_KEY
+
+        if not api_key:
+            raise ValueError(
+                "GEMINI_API_KEY chưa được cấu hình. "
+                "Vui lòng thêm biến môi trường hoặc file .env."
+            )
+
+        client = genai.Client(
+            api_key=api_key,
+        )
+
+    return client
 
 
 # =========================================================
@@ -343,7 +360,7 @@ The result should be practical and useful for employees
 working in a textile or manufacturing environment.
 """
 
-    interaction = client.interactions.create(
+    interaction = get_client().interactions.create(
         model=GEMINI_MODEL,
         input=SYSTEM_INSTRUCTION + "\n" + user_input,
         response_format={

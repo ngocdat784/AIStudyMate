@@ -795,3 +795,165 @@ button {
     align-items: flex-start;
   }
 }
+/* -------------------------------- */
+/* Data Quality */
+/* -------------------------------- */
+
+.data-quality-card {
+  overflow: hidden;
+}
+
+.data-quality-main {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  margin-top: 28px;
+}
+
+.quality-score {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.quality-score-number {
+  font-size: 56px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -2px;
+}
+
+.quality-score-total {
+  font-size: 18px;
+  opacity: 0.5;
+}
+
+.quality-status {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.quality-status strong {
+  font-size: 18px;
+}
+
+.quality-status span {
+  font-size: 13px;
+  opacity: 0.6;
+}
+
+.quality-stats {
+  display: grid;
+  grid-template-columns:
+    repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.quality-stat {
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quality-stat span {
+  font-size: 12px;
+  opacity: 0.55;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.quality-stat strong {
+  font-size: 22px;
+}
+
+.quality-success {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.quality-success strong {
+  font-size: 14px;
+}
+
+.quality-success span {
+  font-size: 13px;
+  opacity: 0.6;
+}
+
+.quality-issues {
+  margin-top: 22px;
+  padding-top: 22px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.quality-issues-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 12px;
+}
+
+.quality-issues-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quality-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 11px 0;
+}
+
+.quality-issue > span {
+  font-size: 11px;
+  opacity: 0.4;
+  min-width: 20px;
+}
+
+.quality-issue p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.quality-excellent .quality-score-number {
+  color: #4ade80;
+}
+
+.quality-good .quality-score-number {
+  color: #a3e635;
+}
+
+.quality-review .quality-score-number {
+  color: #facc15;
+}
+
+.quality-poor .quality-score-number {
+  color: #f87171;
+}
+
+@media (max-width: 768px) {
+  .data-quality-main {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .quality-stats {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+  }
+}

@@ -237,6 +237,13 @@ async def analyze_hardware(
             )
         )
 
+        response["data_quality"] = (
+            kpis.get(
+                "data_quality",
+                {},
+            )
+        )
+
         return response
 
     except HTTPException:
