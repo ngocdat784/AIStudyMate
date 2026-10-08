@@ -9,6 +9,9 @@ from google import genai
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.services.hardware_ai_service import (
+    analyze_hardware_deep,
+)
 
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
@@ -1841,12 +1844,35 @@ Chỉ trả về JSON đúng schema.
 
 def analyze_hardware_dataframe(
     dataframe: pd.DataFrame,
-) -> HardwareAnalysis:
+) -> dict[str, Any]:
 
     kpis = calculate_hardware_kpis(
         dataframe
     )
 
-    return generate_ai_insights(
+    analysis = generate_ai_insights(
         kpis
     )
+
+    result = analysis.model_dump()
+
+    for section in (
+        "product_performance",
+        "model_performance",
+        "component_performance",
+        "supplier_performance",
+        "batch_performance",
+        "defect_type_analysis",
+        "daily_production",
+        "data_scope",
+        "data_quality",
+    ):
+        result[section] = kpis.get(
+            section,
+            {} if section in ("data_scope", "data_quality") else [],
+        )
+
+    deep_ai = analyze_hardware_deep(result)
+    result["ai_analysis"] = deep_ai
+
+    return result

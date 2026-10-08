@@ -4,7 +4,6 @@ import pandas as pd
 
 from app.services.hardware_service import (
     analyze_hardware_dataframe,
-    calculate_hardware_kpis,
 )
 
 
@@ -251,128 +250,7 @@ async def analyze_hardware(
                 detail="File không chứa dữ liệu."
             )
 
-        # =================================================
-        # Calculate Hardware KPIs
-        # =================================================
-
-        kpis = calculate_hardware_kpis(
-            dataframe
-        )
-
-        # =================================================
-        # Gemini Hardware Analysis
-        # =================================================
-
-        analysis = analyze_hardware_dataframe(
-            dataframe
-        )
-
-        # =================================================
-        # Return Dashboard Data
-        # =================================================
-
-        response = analysis.model_dump()
-
-        # -------------------------------------------------
-        # Product
-        # -------------------------------------------------
-
-        response["product_performance"] = (
-            kpis.get(
-                "product_performance",
-                []
-            )
-        )
-
-        # -------------------------------------------------
-        # Model
-        # -------------------------------------------------
-
-        response["model_performance"] = (
-            kpis.get(
-                "model_performance",
-                []
-            )
-        )
-
-        # -------------------------------------------------
-        # Component
-        # -------------------------------------------------
-
-        response["component_performance"] = (
-            kpis.get(
-                "component_performance",
-                []
-            )
-        )
-
-        # -------------------------------------------------
-        # Supplier
-        # -------------------------------------------------
-
-        response["supplier_performance"] = (
-            kpis.get(
-                "supplier_performance",
-                []
-            )
-        )
-
-        # -------------------------------------------------
-        # Batch
-        # -------------------------------------------------
-
-        response["batch_performance"] = (
-            kpis.get(
-                "batch_performance",
-                []
-            )
-        )
-
-        # -------------------------------------------------
-        # Defect Type
-        # -------------------------------------------------
-
-        response["defect_type_analysis"] = (
-            kpis.get(
-                "defect_type_analysis",
-                []
-            )
-        )
-
-        # -------------------------------------------------
-        # Daily Production
-        # -------------------------------------------------
-
-        response["daily_production"] = (
-            kpis.get(
-                "daily_production",
-                []
-            )
-        )
-
-        # -------------------------------------------------
-        # Data Scope
-        # -------------------------------------------------
-
-        response["data_scope"] = (
-            kpis.get(
-                "data_scope",
-                {}
-            )
-        )
-
-        # -------------------------------------------------
-        # Data Quality
-        # -------------------------------------------------
-
-        response["data_quality"] = (
-            kpis.get(
-                "data_quality",
-                {}
-            )
-        )
-
-        return response
+        return analyze_hardware_dataframe(dataframe)
 
     except HTTPException:
         raise
