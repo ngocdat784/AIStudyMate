@@ -68,6 +68,59 @@ type DataQuality = {
   warnings: string[];
 };
 
+type AnalysisSection = {
+  summary: string;
+  key_observations: string[];
+};
+
+type EvidenceKey =
+  | "production"
+  | "defects"
+  | "defect_rate"
+  | "downtime";
+
+type RiskArea = {
+  entity_type:
+    | "product"
+    | "model"
+    | "component"
+    | "supplier"
+    | "batch"
+    | "defect_type"
+    | "date";
+  entity_name: string;
+  risk_level: "low" | "medium" | "high" | "critical";
+  evidence_keys: EvidenceKey[];
+  observation: string;
+  investigation_points: string[];
+  evidence: {
+    production?: number;
+    defects?: number;
+    defect_rate?: number;
+    downtime?: number;
+  };
+};
+
+type RecommendedAction = {
+  priority: "low" | "medium" | "high" | "critical";
+  action: string;
+  target_type: string;
+  target_name: string;
+  reason: string;
+};
+
+type AIAnalysis = {
+  executive_summary: AnalysisSection;
+  production_analysis: AnalysisSection;
+  quality_analysis: AnalysisSection;
+  component_analysis: AnalysisSection;
+  supplier_analysis: AnalysisSection;
+  batch_analysis: AnalysisSection;
+  downtime_analysis: AnalysisSection;
+  risk_areas: RiskArea[];
+  recommended_actions: RecommendedAction[];
+};
+
 type HardwareResult = {
   title: string;
   summary: string;
@@ -91,6 +144,7 @@ type HardwareResult = {
   data_scope: DataScope;
 
   data_quality: DataQuality;
+  ai_analysis: AIAnalysis;
 };
 
 export default function Home() {
@@ -1056,6 +1110,94 @@ export default function Home() {
               className="recommendations"
             />
 
+            {/* -------------------------------- */}
+            {/* AI Deep Analysis */}
+            {/* -------------------------------- */}
+
+            <section className="ai-deep-analysis">
+
+              <div className="ai-deep-header">
+                <div>
+                  <div className="result-label">
+                    AI DEEP ANALYSIS
+                  </div>
+
+                  <h2>
+                    Phân tích sản xuất chuyên sâu
+                  </h2>
+
+                  <p>
+                    Gemini AI phân tích sâu dữ liệu sản xuất dựa trên
+                    các KPI và chỉ số đã được hệ thống tính toán.
+                  </p>
+                </div>
+
+                <div className="ai-deep-badge">
+                  Gemini AI
+                </div>
+              </div>
+
+              <AIAnalysisSection
+                number="13"
+                title="Tóm tắt điều hành"
+                subtitle="Executive summary"
+                analysis={result.ai_analysis.executive_summary}
+              />
+
+              <AIAnalysisSection
+                number="14"
+                title="Phân tích sản xuất"
+                subtitle="Production analysis"
+                analysis={result.ai_analysis.production_analysis}
+              />
+
+              <AIAnalysisSection
+                number="15"
+                title="Phân tích chất lượng"
+                subtitle="Quality analysis"
+                analysis={result.ai_analysis.quality_analysis}
+              />
+
+              <AIAnalysisSection
+                number="16"
+                title="Phân tích linh kiện"
+                subtitle="Component analysis"
+                analysis={result.ai_analysis.component_analysis}
+              />
+
+              <AIAnalysisSection
+                number="17"
+                title="Phân tích nhà cung cấp"
+                subtitle="Supplier analysis"
+                analysis={result.ai_analysis.supplier_analysis}
+              />
+
+              <AIAnalysisSection
+                number="18"
+                title="Phân tích lô sản xuất"
+                subtitle="Batch analysis"
+                analysis={result.ai_analysis.batch_analysis}
+              />
+
+              <AIAnalysisSection
+                number="19"
+                title="Phân tích downtime"
+                subtitle="Downtime analysis"
+                analysis={result.ai_analysis.downtime_analysis}
+              />
+
+              <RiskAreasSection
+                number="20"
+                risks={result.ai_analysis.risk_areas}
+              />
+
+              <RecommendedActionsSection
+                number="21"
+                actions={result.ai_analysis.recommended_actions}
+              />
+
+            </section>
+
 
 
             {/* -------------------------------- */}
@@ -1647,6 +1789,372 @@ function AISection({
       )}
 
     </section>
+  );
+}
+
+
+
+function AIAnalysisSection({
+  number,
+  title,
+  subtitle,
+  analysis,
+}: {
+  number: string;
+  title: string;
+  subtitle: string;
+  analysis: AnalysisSection;
+}) {
+  return (
+    <section className="dashboard-card ai-analysis-card">
+
+      <div className="dashboard-card-header">
+        <div>
+          <div className="ai-section-title">
+            <span>{number}</span>
+
+            <h3>{title}</h3>
+          </div>
+        </div>
+
+        <p>{subtitle}</p>
+      </div>
+
+      <div className="ai-analysis-summary">
+        <p>{analysis.summary}</p>
+      </div>
+
+      {analysis.key_observations.length > 0 && (
+        <div className="ai-observations">
+
+          <div className="ai-subsection-title">
+            Nhận định chính
+          </div>
+
+          <div className="ai-observation-list">
+
+            {analysis.key_observations.map(
+              (observation, index) => (
+                <div
+                  className="ai-observation"
+                  key={`${number}-${index}`}
+                >
+                  <span>
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+
+                  <p>{observation}</p>
+                </div>
+              )
+            )}
+
+          </div>
+        </div>
+      )}
+
+    </section>
+  );
+}
+
+
+
+function RiskAreasSection({
+  number,
+  risks,
+}: {
+  number: string;
+  risks: RiskArea[];
+}) {
+  return (
+    <section className="dashboard-card risk-areas-card">
+
+      <div className="dashboard-card-header">
+
+        <div>
+          <div className="ai-section-title">
+            <span>{number}</span>
+
+            <h3>Khu vực rủi ro</h3>
+          </div>
+        </div>
+
+        <p>Risk areas</p>
+
+      </div>
+
+      {risks.length === 0 ? (
+        <div className="empty-ai">
+          Không phát hiện khu vực rủi ro nổi bật.
+        </div>
+      ) : (
+        <div className="risk-grid">
+
+          {risks.map((risk, index) => (
+            <RiskAreaCard
+              key={`${risk.entity_type}-${risk.entity_name}-${index}`}
+              risk={risk}
+            />
+          ))}
+
+        </div>
+      )}
+
+    </section>
+  );
+}
+
+
+
+function RiskAreaCard({
+  risk,
+}: {
+  risk: RiskArea;
+}) {
+  const riskLabel = {
+    low: "Thấp",
+    medium: "Trung bình",
+    high: "Cao",
+    critical: "Nghiêm trọng",
+  }[risk.risk_level];
+
+  const entityTypeLabel = {
+    product: "Sản phẩm",
+    model: "Model",
+    component: "Linh kiện",
+    supplier: "Nhà cung cấp",
+    batch: "Batch",
+    defect_type: "Loại lỗi",
+    date: "Ngày",
+  }[risk.entity_type];
+
+  return (
+    <article className="risk-area-card">
+
+      <div className="risk-area-top">
+
+        <div>
+          <span className="risk-entity-type">
+            {entityTypeLabel}
+          </span>
+
+          <h4>{risk.entity_name}</h4>
+        </div>
+
+        <span
+          className={`risk-level risk-${risk.risk_level}`}
+        >
+          {riskLabel}
+        </span>
+
+      </div>
+
+      <div className="risk-evidence">
+
+        <div className="ai-subsection-title">
+          Bằng chứng
+        </div>
+
+        <div className="risk-evidence-grid">
+
+          {risk.evidence.production !== undefined && (
+            <EvidenceItem
+              label="Sản lượng"
+              value={risk.evidence.production}
+              unit="đơn vị"
+            />
+          )}
+
+          {risk.evidence.defects !== undefined && (
+            <EvidenceItem
+              label="Số lỗi"
+              value={risk.evidence.defects}
+              unit="lỗi"
+            />
+          )}
+
+          {risk.evidence.defect_rate !== undefined && (
+            <EvidenceItem
+              label="Tỷ lệ lỗi"
+              value={risk.evidence.defect_rate}
+              unit="%"
+            />
+          )}
+
+          {risk.evidence.downtime !== undefined && (
+            <EvidenceItem
+              label="Downtime"
+              value={risk.evidence.downtime}
+              unit="phút"
+            />
+          )}
+
+        </div>
+
+      </div>
+
+      <div className="risk-observation">
+
+        <div className="ai-subsection-title">
+          Nhận định
+        </div>
+
+        <p>{risk.observation}</p>
+
+      </div>
+
+      {risk.investigation_points.length > 0 && (
+        <div className="risk-investigation">
+
+          <div className="ai-subsection-title">
+            Cần kiểm tra
+          </div>
+
+          <div className="investigation-list">
+
+            {risk.investigation_points.map(
+              (point, index) => (
+                <div
+                  className="investigation-item"
+                  key={index}
+                >
+                  <span>→</span>
+
+                  <p>{point}</p>
+                </div>
+              )
+            )}
+
+          </div>
+        </div>
+      )}
+
+    </article>
+  );
+}
+
+
+
+function EvidenceItem({
+  label,
+  value,
+  unit,
+}: {
+  label: string;
+  value: number;
+  unit: string;
+}) {
+  const formattedValue =
+    label === "Tỷ lệ lỗi"
+      ? value.toFixed(2)
+      : value.toLocaleString("vi-VN");
+
+  return (
+    <div className="evidence-item">
+
+      <span>{label}</span>
+
+      <strong>{formattedValue}</strong>
+
+      <small>{unit}</small>
+
+    </div>
+  );
+}
+
+
+
+function RecommendedActionsSection({
+  number,
+  actions,
+}: {
+  number: string;
+  actions: RecommendedAction[];
+}) {
+  return (
+    <section className="dashboard-card recommended-actions-card">
+
+      <div className="dashboard-card-header">
+        <div>
+          <div className="ai-section-title">
+            <span>{number}</span>
+
+            <h3>Hành động đề xuất</h3>
+          </div>
+        </div>
+
+        <p>Recommended actions</p>
+      </div>
+
+      {actions.length === 0 ? (
+        <div className="empty-ai">
+          Chưa có hành động đề xuất.
+        </div>
+      ) : (
+        <div className="recommended-action-list">
+          {actions.map((action, index) => (
+            <RecommendedActionCard
+              key={`${action.target_name}-${index}`}
+              action={action}
+              index={index}
+            />
+          ))}
+        </div>
+      )}
+
+    </section>
+  );
+}
+
+
+
+function RecommendedActionCard({
+  action,
+  index,
+}: {
+  action: RecommendedAction;
+  index: number;
+}) {
+  const priorityLabel = {
+    low: "Thấp",
+    medium: "Trung bình",
+    high: "Cao",
+    critical: "Nghiêm trọng",
+  }[action.priority];
+
+  return (
+    <article className="recommended-action">
+
+      <div className="recommended-action-number">
+        {String(index + 1).padStart(2, "0")}
+      </div>
+
+      <div className="recommended-action-content">
+
+        <div className="recommended-action-heading">
+
+          <span
+            className={`priority-badge priority-${action.priority}`}
+          >
+            {priorityLabel}
+          </span>
+
+          <span className="action-target">
+            {action.target_name}
+          </span>
+
+        </div>
+
+        <h4>
+          {action.action}
+        </h4>
+
+        <p>
+          {action.reason}
+        </p>
+
+      </div>
+
+    </article>
   );
 }
 

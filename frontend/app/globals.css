@@ -957,3 +957,351 @@ button {
       repeat(2, minmax(0, 1fr));
   }
 }
+/* ========================================
+   AI DEEP ANALYSIS
+======================================== */
+
+.ai-deep-analysis {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin-top: 32px;
+}
+
+.ai-deep-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 8px 0;
+}
+
+.ai-deep-header h2 {
+  margin: 8px 0;
+}
+
+.ai-deep-header p {
+  margin: 0;
+  max-width: 720px;
+  line-height: 1.7;
+}
+
+.ai-deep-badge {
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+
+/* ========================================
+   AI ANALYSIS SECTION
+======================================== */
+
+.ai-section-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ai-section-title > span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  opacity: 0.55;
+}
+
+.ai-analysis-card {
+  overflow: hidden;
+}
+
+.ai-analysis-summary {
+  margin-top: 4px;
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.ai-analysis-summary p {
+  margin: 0;
+  line-height: 1.75;
+}
+
+.ai-observations {
+  margin-top: 22px;
+}
+
+.ai-subsection-title {
+  margin-bottom: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.ai-observation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-observation {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 13px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.ai-observation > span {
+  flex: 0 0 28px;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.45;
+}
+
+.ai-observation p {
+  margin: 0;
+  line-height: 1.65;
+}
+
+
+/* ========================================
+   RISK AREAS
+======================================== */
+
+.risk-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.risk-area-card {
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.risk-area-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.risk-entity-type {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.5;
+}
+
+.risk-area-card h4 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.risk-level {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.risk-low {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.risk-medium {
+  background: rgba(255, 190, 70, 0.12);
+}
+
+.risk-high {
+  background: rgba(255, 120, 70, 0.14);
+}
+
+.risk-critical {
+  background: rgba(255, 70, 70, 0.16);
+}
+
+.risk-evidence {
+  margin-top: 22px;
+}
+
+.risk-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.evidence-item {
+  display: flex;
+  flex-direction: column;
+  padding: 13px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.evidence-item span {
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+.evidence-item strong {
+  margin-top: 5px;
+  font-size: 19px;
+}
+
+.evidence-item small {
+  margin-top: 2px;
+  font-size: 10px;
+  opacity: 0.45;
+}
+
+.risk-observation {
+  margin-top: 22px;
+}
+
+.risk-observation p {
+  margin: 0;
+  line-height: 1.65;
+}
+
+.risk-investigation {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.investigation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.investigation-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.investigation-item span {
+  opacity: 0.5;
+}
+
+.investigation-item p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+
+/* ========================================
+   RECOMMENDED ACTIONS
+======================================== */
+
+.recommended-action-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.recommended-action {
+  display: flex;
+  gap: 18px;
+  padding: 20px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.recommended-action:first-child {
+  border-top: 0;
+}
+
+.recommended-action-number {
+  flex: 0 0 32px;
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.45;
+}
+
+.recommended-action-content {
+  flex: 1;
+}
+
+.recommended-action-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.priority-badge {
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.priority-low {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.priority-medium {
+  background: rgba(255, 190, 70, 0.12);
+}
+
+.priority-high {
+  background: rgba(255, 120, 70, 0.14);
+}
+
+.priority-critical {
+  background: rgba(255, 70, 70, 0.16);
+}
+
+.action-target {
+  font-size: 12px;
+  opacity: 0.55;
+}
+
+.recommended-action h4 {
+  margin: 9px 0 7px;
+  font-size: 16px;
+}
+
+.recommended-action p {
+  margin: 0;
+  line-height: 1.65;
+  opacity: 0.75;
+}
+
+
+/* ========================================
+   RESPONSIVE
+======================================== */
+
+@media (max-width: 800px) {
+  .ai-deep-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .risk-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .risk-evidence-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .risk-area-top {
+    flex-direction: column;
+  }
+}
