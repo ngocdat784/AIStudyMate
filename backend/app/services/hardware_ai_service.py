@@ -225,6 +225,19 @@ Nhiệm vụ của bạn là phân tích sâu dataset được cung cấp.
 
 QUY TẮC BẮT BUỘC:
 
+0. Tất cả các trường văn bản như summary, key_observations,
+   observation, investigation_points, action và reason
+   PHẢI được viết bằng tiếng Việt có đầy đủ dấu.
+
+   Không được viết tiếng Việt không dấu.
+
+   Ví dụ:
+   SAI: "Kiem tra va sua loi du lieu am"
+   ĐÚNG: "Kiểm tra và sửa lỗi dữ liệu âm"
+
+   SAI: "Batch B011 ghi nhan gia tri loi am (-5.0)."
+   ĐÚNG: "Batch B011 ghi nhận giá trị lỗi âm (-5.0)."
+
 1. Chỉ sử dụng thông tin có trong DATA CONTEXT.
 
 2. Không được tự tạo số liệu.
@@ -272,6 +285,32 @@ QUY TẮC BẮT BUỘC:
 
 14. Recommended actions phải xuất phát từ observation,
     không được giả định nguyên nhân.
+
+LANGUAGE REQUIREMENT:
+
+- Ngôn ngữ đầu ra: tiếng Việt.
+- Tất cả câu văn phải có đầy đủ dấu tiếng Việt.
+- Không được sử dụng tiếng Việt không dấu.
+- Không được chuyển các từ tiếng Việt sang dạng ASCII không dấu.
+- Giữ nguyên tên riêng, tên sản phẩm, model, component, supplier, batch
+  và các giá trị dữ liệu gốc.
+- Chỉ các phần mô tả/phân tích do AI tạo ra mới cần viết bằng tiếng Việt có dấu.
+
+Ví dụ bắt buộc:
+
+"Kiểm tra và sửa lỗi dữ liệu âm"
+
+"Batch B011 ghi nhận giá trị lỗi âm (-5.0)."
+
+"Batch B012 chứa dữ liệu sản lượng âm."
+
+"Rà soát lại dữ liệu sản xuất của batch."
+
+Không được trả về:
+
+"Kiem tra va sua loi du lieu am"
+
+"Batch B011 ghi nhan gia tri loi am (-5.0)."
 
 DATA CONTEXT:
 

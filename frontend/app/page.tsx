@@ -685,11 +685,11 @@ export default function Home() {
                 </div>
 
                 <h2>
-                  {result.title}
+                  <AIText>{result.title}</AIText>
                 </h2>
 
                 <p>
-                  {result.summary}
+                  <AIText>{result.summary}</AIText>
                 </p>
 
               </div>
@@ -1127,12 +1127,13 @@ export default function Home() {
                   </h2>
 
                   <p>
-                    Gemini AI phân tích sâu dữ liệu sản xuất dựa trên
-                    các KPI và chỉ số đã được hệ thống tính toán.
+                    Phân tích chuyên sâu dựa trên KPI, chất lượng dữ liệu
+                    và các chỉ số vận hành đã được hệ thống tính toán.
                   </p>
                 </div>
 
                 <div className="ai-deep-badge">
+                  <span className="ai-deep-status-dot" />
                   Gemini AI
                 </div>
               </div>
@@ -1777,7 +1778,7 @@ function AISection({
                 </span>
 
                 <p>
-                  {item}
+                  <AIText>{item}</AIText>
                 </p>
 
               </div>
@@ -1821,7 +1822,9 @@ function AIAnalysisSection({
       </div>
 
       <div className="ai-analysis-summary">
-        <p>{analysis.summary}</p>
+        <p>
+          <AIText>{analysis.summary}</AIText>
+        </p>
       </div>
 
       {analysis.key_observations.length > 0 && (
@@ -1843,7 +1846,9 @@ function AIAnalysisSection({
                     {String(index + 1).padStart(2, "0")}
                   </span>
 
-                  <p>{observation}</p>
+                  <p>
+                    <AIText>{observation}</AIText>
+                  </p>
                 </div>
               )
             )}
@@ -1931,13 +1936,14 @@ function RiskAreaCard({
     <article className="risk-area-card">
 
       <div className="risk-area-top">
-
-        <div>
+        <div className="risk-area-identity">
           <span className="risk-entity-type">
             {entityTypeLabel}
           </span>
 
-          <h4>{risk.entity_name}</h4>
+          <h4>
+            <AIText>{risk.entity_name}</AIText>
+          </h4>
         </div>
 
         <span
@@ -1998,7 +2004,9 @@ function RiskAreaCard({
           Nhận định
         </div>
 
-        <p>{risk.observation}</p>
+        <p>
+          <AIText>{risk.observation}</AIText>
+        </p>
 
       </div>
 
@@ -2019,7 +2027,9 @@ function RiskAreaCard({
                 >
                   <span>→</span>
 
-                  <p>{point}</p>
+                  <p>
+                    <AIText>{point}</AIText>
+                  </p>
                 </div>
               )
             )}
@@ -2043,19 +2053,35 @@ function EvidenceItem({
   value: number;
   unit: string;
 }) {
+  const isNegative = value < 0;
+
   const formattedValue =
     label === "Tỷ lệ lỗi"
-      ? value.toFixed(2)
-      : value.toLocaleString("vi-VN");
+      ? formatAIValue(value, "percent")
+      : formatAIValue(value, "number");
 
   return (
-    <div className="evidence-item">
+    <div
+      className={`evidence-item ${
+        isNegative ? "evidence-negative" : ""
+      }`}
+    >
 
-      <span>{label}</span>
+      <span className="evidence-label">
+        {label}
+      </span>
 
-      <strong>{formattedValue}</strong>
+      <div className="evidence-value-row">
+        <strong>{formattedValue}</strong>
 
-      <small>{unit}</small>
+        <small>{unit}</small>
+      </div>
+
+      {isNegative && (
+        <span className="evidence-warning">
+          Giá trị bất thường
+        </span>
+      )}
 
     </div>
   );
@@ -2139,17 +2165,17 @@ function RecommendedActionCard({
           </span>
 
           <span className="action-target">
-            {action.target_name}
+            <AIText>{action.target_name}</AIText>
           </span>
 
         </div>
 
         <h4>
-          {action.action}
+          <AIText>{action.action}</AIText>
         </h4>
 
         <p>
-          {action.reason}
+          <AIText>{action.reason}</AIText>
         </p>
 
       </div>
@@ -2163,6 +2189,86 @@ function RecommendedActionCard({
 /* -------------------------------- */
 /* Helpers */
 /* -------------------------------- */
+
+function decodeHtmlEntities(value: string) {
+  if (!value) {
+    return "";
+  }
+
+  if (typeof window === "undefined") {
+    return value;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = value;
+
+  return textarea.value;
+}
+
+function normalizeAIText(value: string) {
+  if (!value) {
+    return "";
+  }
+
+  let text = decodeHtmlEntities(String(value));
+
+  text = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+
+  text = text
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return text;
+}
+
+function formatAIValue(
+  value: number,
+  type: "number" | "percent"
+) {
+  if (type === "percent") {
+    return value.toFixed(2);
+  }
+
+  return value.toLocaleString("vi-VN", {
+    maximumFractionDigits: 2,
+  });
+}
+
+function AIText({
+  children,
+}: {
+  children: string;
+}) {
+  const text = normalizeAIText(children);
+
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (
+          part.startsWith("**") &&
+          part.endsWith("**")
+        ) {
+          return (
+            <strong key={index}>
+              {part.slice(2, -2)}
+            </strong>
+          );
+        }
+
+        return (
+          <span key={index}>
+            {part}
+          </span>
+        );
+      })}
+    </>
+  );
+}
 
 function getFieldLabel(
   field:

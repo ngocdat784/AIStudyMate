@@ -1305,3 +1305,245 @@ button {
     flex-direction: column;
   }
 }
+.evidence-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 82px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.evidence-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  opacity: 0.55;
+}
+
+.evidence-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.evidence-value-row strong {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.evidence-value-row small {
+  font-size: 10px;
+  opacity: 0.45;
+}
+
+.evidence-warning {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 8px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(255, 90, 70, 0.1);
+}
+.evidence-negative {
+  border-color: rgba(255, 90, 70, 0.22);
+  background: rgba(255, 90, 70, 0.045);
+}
+
+.evidence-negative .evidence-value-row strong {
+  color: #ff8a7a;
+}
+.risk-area-card {
+  position: relative;
+  padding: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+
+.risk-area-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.risk-area-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.risk-area-card:has(.risk-critical)::before {
+  background: rgba(255, 70, 70, 0.8);
+}
+
+.risk-area-card:has(.risk-high)::before {
+  background: rgba(255, 120, 70, 0.8);
+}
+
+.risk-area-card:has(.risk-medium)::before {
+  background: rgba(255, 190, 70, 0.8);
+}
+.risk-area-identity {
+  min-width: 0;
+}
+
+.risk-area-card h4 {
+  margin: 0;
+  font-size: 21px;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.risk-entity-type {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.45;
+}
+.risk-investigation {
+  margin-top: 22px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.investigation-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 0;
+}
+
+.investigation-item + .investigation-item {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.investigation-item span {
+  flex: 0 0 18px;
+  opacity: 0.5;
+}
+
+.investigation-item p {
+  margin: 0;
+  line-height: 1.65;
+}
+.recommended-action {
+  position: relative;
+  display: flex;
+  gap: 18px;
+  padding: 22px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.recommended-action:first-child {
+  padding-top: 4px;
+  border-top: 0;
+}
+
+.recommended-action-number {
+  flex: 0 0 36px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  opacity: 0.35;
+}
+
+.recommended-action-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.recommended-action-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.priority-badge {
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.action-target {
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 6px;
+  font-size: 10px;
+  opacity: 0.55;
+}
+
+.recommended-action h4 {
+  margin: 10px 0 7px;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.recommended-action p {
+  max-width: 760px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  opacity: 0.62;
+}
+.ai-deep-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px 0 4px;
+}
+
+.ai-deep-header h2 {
+  margin: 8px 0 9px;
+  font-size: clamp(25px, 3vw, 34px);
+  line-height: 1.15;
+}
+
+.ai-deep-header p {
+  max-width: 720px;
+  margin: 0;
+  line-height: 1.7;
+  opacity: 0.6;
+}
+
+.ai-deep-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ai-deep-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
