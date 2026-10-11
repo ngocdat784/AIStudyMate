@@ -250,7 +250,12 @@ async def analyze_hardware(
                 detail="File không chứa dữ liệu."
             )
 
-        return analyze_hardware_dataframe(dataframe)
+        response = analyze_hardware_dataframe(dataframe)
+
+        return {
+            **response,
+            "data_quality": response["data_quality"],
+        }
 
     except HTTPException:
         raise

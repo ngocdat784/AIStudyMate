@@ -9,6 +9,9 @@ from google import genai
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.services.data_quality_service import (
+    calculate_data_quality,
+)
 from app.services.hardware_ai_service import (
     analyze_hardware_deep,
 )
@@ -472,349 +475,37 @@ def clean_dataframe(
     dataframe = dataframe.copy()
 
     # Remove completely empty rows.
-    dataframe = dataframe.dropna(
-        how="all"
-    )
+    dataframe = dataframe.dropna(how="all")
 
     # Remove rows where every value is an empty string.
-    dataframe = dataframe[
-        ~dataframe.apply(
-            lambda row: all(
-                str(value).strip() == ""
-                or pd.isna(value)
-                for value in row
-            ),
-            axis=1,
-        )
-    ]
-
-    dataframe = dataframe.reset_index(
-        drop=True
-    )
-
-    if dataframe.empty:
-        raise ValueError(
-            "File dữ liệu phần cứng không chứa dữ liệu hợp lệ."
-        )
-
-    return dataframe
-
-
-def calculate_data_quality(
-    dataframe: pd.DataFrame,
-) -> dict[str, Any]:
-    """Report input data issues without modifying the dataframe."""
-    if dataframe is None:
-        return {
-            "quality_score": 0,
-            "total_rows": 0,
-            "data_rows": 0,
-            "valid_rows": 0,
-            "invalid_rows": 0,
-            "empty_rows": 0,
-            "duplicate_rows": 0,
-            "missing_values": {},
-            "invalid_values": {},
-            "negative_values": {},
-            "missing_columns": [],
-            "warnings": ["Không có dữ liệu để kiểm tra."],
-        }
-
-    df = dataframe.copy()
-    total_rows = len(df)
-
-    if total_rows == 0:
-        return {
-            "quality_score": 0,
-            "total_rows": 0,
-            "data_rows": 0,
-            "valid_rows": 0,
-            "invalid_rows": 0,
-            "empty_rows": 0,
-            "duplicate_rows": 0,
-            "missing_values": {},
-            "invalid_values": {},
-            "negative_values": {},
-            "missing_columns": [],
-            "warnings": ["File không chứa dữ liệu."],
-        }
-
-    empty_mask = df.apply(
+    empty_rows = dataframe.apply(
         lambda row: all(
             pd.isna(value) or str(value).strip() == ""
             for value in row
         ),
         axis=1,
     )
-    empty_rows = int(empty_mask.sum())
-    data_df = df.loc[~empty_mask].copy()
-    data_rows = len(data_df)
 
-    column_map = {
-        normalize_column_name(column): column
-        for column in data_df.columns
-    }
+    dataframe = dataframe.loc[~empty_rows].copy()
 
-    field_aliases = {
-        "date": [
-            "date",
-            "ngày",
-            "ngay",
-            "production date",
-            "production_date",
-        ],
-        "product": [
-            "product",
-            "sản phẩm",
-            "san pham",
-        ],
-        "model": [
-            "model",
-            "mã sản phẩm",
-            "ma san pham",
-            "product model",
-        ],
-        "component": [
-            "component",
-            "linh kiện",
-            "linh kien",
-        ],
-        "supplier": [
-            "supplier",
-            "nhà cung cấp",
-            "nha cung cap",
-        ],
-        "batch": [
-            "batch",
-            "lô",
-            "lo",
-            "lot",
-        ],
-        "defect_type": [
-            "defect type",
-            "defect_type",
-            "loại lỗi",
-            "loai loi",
-            "defect",
-        ],
-        "production": [
-            "production",
-            "sản lượng",
-            "san luong",
-            "quantity",
-            "qty",
-        ],
-        "defects": [
-            "defects",
-            "defect count",
-            "số lỗi",
-            "so loi",
-        ],
-        "downtime": [
-            "downtime",
-            "thời gian dừng",
-            "thoi gian dung",
-        ],
-    }
-
-    normalized_field_aliases = {
-        field: [
-            normalize_column_name(alias)
-            for alias in aliases + COLUMN_ALIASES.get(field, [])
-        ]
-        for field, aliases in field_aliases.items()
-    }
-
-    detected_columns: dict[str, Any] = {}
-
-    for field, aliases in normalized_field_aliases.items():
-        found_column = next(
-            (
-                column_map[alias]
-                for alias in aliases
-                if alias in column_map
-            ),
-            None,
-        )
-        if found_column is not None:
-            detected_columns[field] = found_column
-
-    for field, aliases in normalized_field_aliases.items():
-        if field in detected_columns:
-            continue
-
-        found_column = next(
-            (
-                original
-                for normalized, original in column_map.items()
-                if any(
-                    alias in normalized or normalized in alias
-                    for alias in aliases
-                )
-            ),
-            None,
-        )
-        if found_column is not None:
-            detected_columns[field] = found_column
-
-    missing_columns = [
-        field
-        for field in field_aliases
-        if field not in detected_columns
-    ]
-
-    missing_values: dict[str, int] = {}
-    for field, column in detected_columns.items():
-        series = data_df[column]
-        blank_mask = (
-            series.isna()
-            | series.astype("string").str.strip().eq("").fillna(False)
-        )
-        count = int(blank_mask.sum())
-        if count > 0:
-            missing_values[field] = count
-
-    numeric_fields = {"production", "defects", "downtime"}
-    invalid_values: dict[str, int] = {}
-    negative_values: dict[str, int] = {}
-    numeric_issue_masks: dict[str, pd.Series] = {}
-
-    for field in numeric_fields:
-        if field not in detected_columns:
-            continue
-
-        raw_series = data_df[detected_columns[field]]
-        text_series = raw_series.astype("string").str.strip()
-        blank_mask = (
-            raw_series.isna()
-            | text_series.eq("").fillna(False)
-        )
-        cleaned_series = (
-            text_series
-            .str.replace(",", "", regex=False)
-            .str.replace("%", "", regex=False)
-        )
-        numeric_series = pd.to_numeric(
-            cleaned_series,
-            errors="coerce",
+    if dataframe.empty:
+        raise ValueError(
+            "File dữ liệu phần cứng không chứa dữ liệu hợp lệ."
         )
 
-        invalid_mask = ~blank_mask & numeric_series.isna()
-        negative_mask = numeric_series.notna() & (numeric_series < 0)
-        invalid_count = int(invalid_mask.sum())
-        negative_count = int(negative_mask.sum())
-
-        if invalid_count > 0:
-            invalid_values[field] = invalid_count
-        if negative_count > 0:
-            negative_values[field] = negative_count
-
-        numeric_issue_masks[field] = (
-            blank_mask | invalid_mask | negative_mask
-        )
-
-    date_issue_mask = pd.Series(
-        False,
-        index=data_df.index,
-        dtype=bool,
-    )
-    if "date" in detected_columns:
-        raw_date = data_df[detected_columns["date"]]
-        blank_mask = (
-            raw_date.isna()
-            | raw_date.astype("string").str.strip().eq("").fillna(False)
-        )
-        parsed_date = pd.to_datetime(
-            raw_date,
-            errors="coerce",
-        )
-        failed_mask = parsed_date.isna() & ~blank_mask
-
-        if failed_mask.any():
-            parsed_date.loc[failed_mask] = pd.to_datetime(
-                raw_date.loc[failed_mask],
-                errors="coerce",
-                dayfirst=True,
-            )
-
-        invalid_date_mask = ~blank_mask & parsed_date.isna()
-        invalid_date_count = int(invalid_date_mask.sum())
-        if invalid_date_count > 0:
-            invalid_values["date"] = invalid_date_count
-
-        date_issue_mask = blank_mask | invalid_date_mask
-
-    duplicate_rows = int(data_df.duplicated().sum())
-
-    row_issue_mask = pd.Series(
-        False,
-        index=data_df.index,
-        dtype=bool,
-    )
-    for column in detected_columns.values():
-        series = data_df[column]
-        row_issue_mask |= (
-            series.isna()
-            | series.astype("string").str.strip().eq("").fillna(False)
-        )
-    for issue_mask in numeric_issue_masks.values():
-        row_issue_mask |= issue_mask
-    row_issue_mask |= date_issue_mask
-
-    invalid_rows = int(row_issue_mask.sum())
-    valid_rows = max(0, data_rows - invalid_rows)
-    checked_columns = len(detected_columns)
-
-    if data_rows == 0 or checked_columns == 0:
-        quality_score = 0
-    else:
-        quality_score = valid_rows / data_rows * 100
-
-    quality_score = round(
-        max(0, min(100, quality_score)),
-        1,
+    # Remove completely duplicated records.
+    dataframe = dataframe.drop_duplicates(
+        keep="first"
     )
 
-    warnings = []
-    if empty_rows > 0:
-        warnings.append(f"Phát hiện {empty_rows} dòng trống.")
-    if duplicate_rows > 0:
-        warnings.append(
-            f"Phát hiện {duplicate_rows} dòng dữ liệu trùng lặp."
-        )
-    for field, count in missing_values.items():
-        warnings.append(
-            f"Thiếu {count} giá trị ở trường '{field}'."
-        )
-    for field, count in invalid_values.items():
-        warnings.append(
-            f"Có {count} giá trị không hợp lệ ở trường '{field}'."
-        )
-    for field, count in negative_values.items():
-        warnings.append(
-            f"Có {count} giá trị âm ở trường '{field}'."
-        )
-    if missing_columns:
-        warnings.append(
-            "Một số trường dữ liệu không xuất hiện: "
-            + ", ".join(missing_columns)
-            + "."
+    dataframe = dataframe.reset_index(drop=True)
+
+    if dataframe.empty:
+        raise ValueError(
+            "Không còn dữ liệu sau khi làm sạch."
         )
 
-    return {
-        "quality_score": quality_score,
-        "total_rows": total_rows,
-        "data_rows": data_rows,
-        "valid_rows": valid_rows,
-        "invalid_rows": invalid_rows,
-        "empty_rows": empty_rows,
-        "duplicate_rows": duplicate_rows,
-        "missing_values": missing_values,
-        "invalid_values": invalid_values,
-        "negative_values": negative_values,
-        "missing_columns": missing_columns,
-        "warnings": warnings[:20],
-    }
+    return dataframe
 
 
 def convert_numeric_column(
@@ -1038,10 +729,17 @@ def calculate_hardware_kpis(
     dataframe: pd.DataFrame,
 ) -> dict[str, Any]:
 
+    if dataframe.empty:
+        raise ValueError(
+            "File dữ liệu phần cứng không chứa dữ liệu."
+        )
+
+    # 1. Kiểm định dữ liệu gốc trước khi làm sạch.
     data_quality = calculate_data_quality(
         dataframe
     )
 
+    # 2. Tiếp tục quy trình xử lý hiện tại.
     dataframe = clean_dataframe(
         dataframe
     )
@@ -1118,87 +816,107 @@ def calculate_hardware_kpis(
             "hoặc 'sản lượng'."
         )
 
-    production = convert_numeric_column(
-        dataframe,
-        production_column,
-    )
-
-    total_production = float(
-        production.sum()
-    )
-
     # =====================================================
-    # Defects
+    # Parse numeric fields and filter invalid KPI records
     # =====================================================
+
+    def parse_numeric_for_validation(
+        series: pd.Series,
+    ) -> pd.Series:
+        values = (
+            series.astype("string")
+            .str.strip()
+            .str.replace(",", "", regex=False)
+            .str.replace("%", "", regex=False)
+        )
+
+        return pd.to_numeric(
+            values,
+            errors="coerce",
+        )
+
+    # Production is required for production KPIs.
+    production_raw = parse_numeric_for_validation(
+        dataframe[production_column]
+    )
 
     if defect_column:
-
-        defects = convert_numeric_column(
-            dataframe,
-            defect_column,
+        defects_raw = parse_numeric_for_validation(
+            dataframe[defect_column]
         )
-
     else:
-
-        defects = pd.Series(
-            0,
+        defects_raw = pd.Series(
+            0.0,
             index=dataframe.index,
-            dtype=float,
         )
-
-    total_defects = float(
-        defects.sum()
-    )
-
-    # =====================================================
-    # Downtime
-    # =====================================================
 
     if downtime_column:
-
-        downtime = convert_numeric_column(
-            dataframe,
-            downtime_column,
+        downtime_raw = parse_numeric_for_validation(
+            dataframe[downtime_column]
         )
-
     else:
-
-        downtime = pd.Series(
-            0,
+        downtime_raw = pd.Series(
+            0.0,
             index=dataframe.index,
-            dtype=float,
         )
 
-    total_downtime = float(
-        downtime.sum()
+    valid_mask = (
+        production_raw.notna()
+        & production_raw.ge(0)
     )
 
-    # =====================================================
-    # Defect Rate
-    # =====================================================
+    if defect_column:
+        valid_mask &= (
+            defects_raw.notna()
+            & defects_raw.ge(0)
+        )
 
-    defect_rate = 0.0
+    if downtime_column:
+        valid_mask &= (
+            downtime_raw.notna()
+            & downtime_raw.ge(0)
+        )
 
-    if total_production > 0:
+    rows_after_deduplication = len(dataframe)
+    dataframe = dataframe.loc[valid_mask].copy()
 
-        defect_rate = (
-            total_defects
-            / total_production
-            * 100
+    production = production_raw.loc[valid_mask].astype(float)
+    defects = defects_raw.loc[valid_mask].astype(float)
+    downtime = downtime_raw.loc[valid_mask].astype(float)
+
+    data_processing = {
+        "rows_after_deduplication": rows_after_deduplication,
+        "rows_used_for_kpi": len(dataframe),
+        "invalid_metric_rows_excluded": (
+            rows_after_deduplication - len(dataframe)
+        ),
+    }
+
+    if dataframe.empty:
+        raise ValueError(
+            "Không còn bản ghi hợp lệ để tính KPI. "
+            "Vui lòng kiểm tra Production, Defects và Downtime."
         )
 
     # =====================================================
-    # Average Production
+    # KPI Totals
     # =====================================================
 
-    average_production_per_record = 0.0
+    total_production = float(production.sum())
+    total_defects = float(defects.sum())
+    total_downtime = float(downtime.sum())
 
-    if len(dataframe) > 0:
+    defect_rate = (
+        total_defects / total_production * 100
+        if total_production > 0
+        else 0.0
+    )
 
-        average_production_per_record = (
-            total_production
-            / len(dataframe)
-        )
+    average_production_per_record = (
+        total_production / len(dataframe)
+        if len(dataframe) > 0
+        else 0.0
+    )
 
     # =====================================================
     # Base KPIs
@@ -1595,6 +1313,7 @@ def calculate_hardware_kpis(
     }
 
     kpis["data_quality"] = data_quality
+    kpis["data_processing"] = data_processing
 
     return kpis
 
@@ -1866,13 +1585,18 @@ def analyze_hardware_dataframe(
         "daily_production",
         "data_scope",
         "data_quality",
+        "data_processing",
     ):
         result[section] = kpis.get(
             section,
-            {} if section in ("data_scope", "data_quality") else [],
+            {} if section in (
+                "data_scope",
+                "data_quality",
+                "data_processing",
+            ) else [],
         )
 
-    deep_ai = analyze_hardware_deep(result)
+    deep_ai = analyze_hardware_deep(kpis)
     result["ai_analysis"] = deep_ai
 
     return result
