@@ -6,14 +6,16 @@ from typing import Any
 
 import pandas as pd
 from google import genai
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
 from app.services.data_quality_service import (
     calculate_data_quality,
 )
 from app.services.hardware_ai_service import (
+    _gemini_response_schema,
     analyze_hardware_deep,
+    normalize_summary_record_scope,
 )
 
 
@@ -25,6 +27,8 @@ GEMINI_MODEL = "gemini-3.5-flash-lite"
 # =========================================================
 
 class KPI(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     value: float | int | str
     unit: str
@@ -32,6 +36,8 @@ class KPI(BaseModel):
 
 
 class HardwareAnalysis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
     summary: str
 
@@ -102,6 +108,42 @@ IMPORTANT DATA RULES
   targets, standards, costs, or thresholds.
 - Only make conclusions supported by supplied data.
 - If data is insufficient, clearly state the limitation.
+- The supplied "defect_rate" values are percentages. Whenever a
+  defect rate appears in prose, include "%" (for example, 2.05 means
+  2.05%, not a unitless value). Preserve numeric KPI values in JSON.
+- All supplied downtime values are in minutes. Keep every total,
+  product/model/component/supplier/batch and daily downtime value in
+  minutes; do not relabel as hours or convert without dividing by 60.
+- "component_count" counts only identified component types. Exclude the
+  "Không xác định" group from this count, while still describing its
+  production in component analysis when present.
+- data_quality.valid_rows/invalid_rows evaluate completeness and validity
+  of all required fields on the original data, including component fields.
+  data_processing.rows_used_for_kpi counts deduplicated rows with valid
+  production and valid defects/downtime when those columns are present.
+  A row missing Component may still be used for KPI calculations, so
+  these counts can differ; explain them separately and never treat
+  invalid rows as defective products.
+- Python calculates all KPI totals, overall defect rate, downtime, group
+  rankings, and record counts. Treat those values as authoritative; do
+  not independently recompute or state conflicting numbers.
+- Python records excluded KPI rows by metric in
+  data_processing.invalid_metric_rows_excluded_by_metric. Those counts
+  may overlap when one row has multiple invalid metrics. Do not invent
+  exclusion counts or reasons.
+- In the summary, describe data_processing.rows_used_for_kpi as records
+  "được sử dụng để tính KPI", never as records that are universally
+  "hợp lệ". If reporting the date count, say they span that many
+  production days. Example: "Dữ liệu bao gồm 12 bản ghi được sử dụng để
+  tính KPI, trải dài trong 5 ngày sản xuất."
+- In defect_type_analysis, "Không xác định" aggregates the defects
+  quantities for records whose defect type is missing/blank. Its
+  "defects" value is a defect quantity, not a count of rows, invalid
+  records, or records excluded from KPI calculation. Never infer these
+  counts are equal.
+- Aggregated defect rates for components, models and batches are
+  descriptive associations only. Do not claim they cause defects or
+  prove their processes are faulty; recommend them for inspection only.
 
 =========================================================
 IMPORTANT ANALYSIS RULES
@@ -156,6 +198,9 @@ or
 - "tỷ lệ lỗi chung"
 
 Do NOT call it "tỷ lệ lỗi trung bình".
+Every defect_rate value is expressed as a percentage. Include the "%"
+symbol whenever stating a defect rate in summaries, insights, warnings,
+or recommendations. For example, say "2,05%" rather than "2.05".
 
 =========================================================
 HARDWARE MANUFACTURING FOCUS
@@ -551,6 +596,32 @@ def count_unique_values(
     )
 
 
+def count_identified_components(
+    dataframe: pd.DataFrame,
+    column: str | None,
+) -> int:
+    if not column:
+        return 0
+
+    values = (
+        dataframe[column]
+        .dropna()
+        .astype(str)
+        .str.strip()
+    )
+    unidentified_values = {
+        "",
+        "không xác định",
+        "khong xac dinh",
+        "unknown",
+    }
+    values = values[
+        ~values.str.casefold().isin(unidentified_values)
+    ]
+
+    return int(values.nunique())
+
+
 # =========================================================
 # Generic Group Analysis
 # =========================================================
@@ -860,6 +931,17 @@ def calculate_hardware_kpis(
             index=dataframe.index,
         )
 
+    excluded_rows_by_metric = {}
+    for metric_name, raw_values, column_exists in (
+        ("production", production_raw, True),
+        ("defects", defects_raw, bool(defect_column)),
+        ("downtime", downtime_raw, bool(downtime_column)),
+    ):
+        if column_exists:
+            excluded_rows_by_metric[metric_name] = int(
+                (raw_values.isna() | raw_values.lt(0)).sum()
+            )
+
     valid_mask = (
         production_raw.notna()
         & production_raw.ge(0)
@@ -889,6 +971,9 @@ def calculate_hardware_kpis(
         "rows_used_for_kpi": len(dataframe),
         "invalid_metric_rows_excluded": (
             rows_after_deduplication - len(dataframe)
+        ),
+        "invalid_metric_rows_excluded_by_metric": (
+            excluded_rows_by_metric
         ),
     }
 
@@ -961,7 +1046,7 @@ def calculate_hardware_kpis(
             model_column,
         ),
 
-        "component_count": count_unique_values(
+        "component_count": count_identified_components(
             dataframe,
             component_column,
         ),
@@ -1322,6 +1407,108 @@ def calculate_hardware_kpis(
 # AI Insights
 # =========================================================
 
+def _normalize_generated_kpis(
+    analysis: HardwareAnalysis,
+    source_kpis: dict[str, Any],
+) -> HardwareAnalysis:
+    for kpi in analysis.kpis:
+        name = kpi.name.strip().casefold()
+
+        if name in {
+            "total_production",
+            "total production",
+            "tổng sản lượng",
+        }:
+            if "total_production" in source_kpis:
+                kpi.value = source_kpis["total_production"]
+            kpi.name = "Tổng sản lượng"
+            kpi.description = (
+                "Tổng sản lượng ghi nhận từ các bản ghi được sử dụng "
+                "để tính KPI."
+            )
+
+        if name in {
+            "total_defects",
+            "total defects",
+            "tổng số lỗi",
+            "tổng lỗi",
+        }:
+            if "total_defects" in source_kpis:
+                kpi.value = source_kpis["total_defects"]
+            kpi.name = "Tổng số lỗi"
+            kpi.description = (
+                "Tổng số lỗi ghi nhận từ các bản ghi được sử dụng "
+                "để tính KPI."
+            )
+
+        is_downtime = (
+            "downtime" in name
+            or "thời gian dừng" in name
+            or "thời gian ngừng" in name
+            or "dừng máy" in name
+            or "ngừng máy" in name
+        )
+        is_total_downtime = is_downtime and (
+            name in {
+                "total_downtime",
+                "tổng downtime",
+                "tổng thời gian dừng máy",
+                "tổng thời gian ngừng máy",
+            }
+            or "tổng" in name
+            or "total" in name
+        )
+        if is_downtime:
+            kpi.unit = "phút"
+            if is_total_downtime:
+                kpi.value = source_kpis["total_downtime"]
+                kpi.name = "Tổng downtime"
+                kpi.description = (
+                    "Tổng thời gian ngừng máy ghi nhận được, "
+                    "tính bằng phút."
+                )
+            else:
+                kpi.description = (
+                    "Thời gian ngừng máy ghi nhận được, tính bằng phút."
+                )
+
+        if (
+            "defect_rate" in name
+            or "defect rate" in name
+            or "tỷ lệ lỗi" in name
+        ):
+            kpi.unit = "%"
+            if name in {
+                "defect_rate",
+                "defect rate",
+                "tỷ lệ lỗi tổng thể",
+                "tổng tỷ lệ lỗi",
+            }:
+                if "defect_rate" in source_kpis:
+                    kpi.value = source_kpis["defect_rate"]
+                kpi.name = "Tỷ lệ lỗi tổng thể"
+                kpi.description = (
+                    "Tỷ lệ lỗi tổng thể từ các bản ghi được sử dụng "
+                    "để tính KPI, tính bằng phần trăm."
+                )
+
+        if name in {
+            "component_count",
+            "số loại linh kiện xác định",
+            "số lượng loại linh kiện xác định",
+            "số lượng linh kiện xác định",
+        }:
+            kpi.value = source_kpis["component_count"]
+            kpi.unit = "loại"
+            kpi.name = "Số loại linh kiện xác định"
+            kpi.description = (
+                "Số lượng loại linh kiện xác định được trong dữ liệu, "
+                "không bao gồm nhóm chưa xác định."
+            )
+
+    return analysis
+
+
 def generate_ai_insights(
     kpis: dict[str, Any],
 ) -> HardwareAnalysis:
@@ -1400,6 +1587,18 @@ Tên KPI phải phản ánh đúng bản chất.
 
 Không thay đổi giá trị.
 
+For total_downtime, use the name "Tổng downtime", preserve its numeric
+value, use unit "phút", and use the description
+"Tổng thời gian ngừng máy ghi nhận được, tính bằng phút."
+For total_production, use the Python-calculated value and the description
+"Tổng sản lượng ghi nhận từ các bản ghi được sử dụng để tính KPI."
+For total_defects, use the Python-calculated value and describe it as
+defects recorded in rows used to calculate KPIs.
+For component_count, use the name "Số loại linh kiện xác định", preserve
+the Python-calculated count, use unit "loại", and describe it as
+"Số lượng loại linh kiện xác định được trong dữ liệu, không bao gồm nhóm chưa xác định."
+If including a defect_rate KPI, use unit "%".
+
 =========================================================
 4. INSIGHTS
 =========================================================
@@ -1436,6 +1635,9 @@ Sử dụng:
 - "có downtime cao nhất"
 
 Không biến tương quan thành nguyên nhân.
+Every defect rate quoted in prose must include the "%" symbol. Use
+Vietnamese decimal commas in prose (for example, 2.05 becomes 2,05%),
+without changing numeric values in structured KPI fields.
 
 =========================================================
 5. WARNINGS
@@ -1482,6 +1684,8 @@ hãy nêu rằng chưa thể xác định root cause.
 - theo dõi KPI trong các ngày tiếp theo
 
 Không khẳng định nguyên nhân nếu chưa có dữ liệu.
+Priority sẽ được chuẩn hóa bằng Python theo các ngưỡng cấu hình ở trên.
+Không tự đặt ngưỡng; không dùng critical nếu không có quy tắc cấu hình.
 
 =========================================================
 7. DATA LIMITATION
@@ -1533,7 +1737,7 @@ Chỉ trả về JSON đúng schema.
         response_format={
             "type": "text",
             "mime_type": "application/json",
-            "schema": HardwareAnalysis.model_json_schema(),
+            "schema": _gemini_response_schema(HardwareAnalysis),
         },
     )
 
@@ -1545,9 +1749,18 @@ Chỉ trả về JSON đúng schema.
 
     try:
 
-        return HardwareAnalysis.model_validate_json(
+        analysis = HardwareAnalysis.model_validate_json(
             interaction.output_text
         )
+        analysis.summary = normalize_summary_record_scope(
+            analysis.summary,
+            kpis,
+        )
+        analysis = _normalize_generated_kpis(
+            analysis,
+            kpis,
+        )
+        return analysis
 
     except Exception as error:
 

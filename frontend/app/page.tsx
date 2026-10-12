@@ -55,6 +55,8 @@ type DataScope = {
 
 type DataQuality = {
   quality_score: number;
+  quality_status: "good" | "warning" | "poor";
+  scoring_basis: string;
   total_rows: number;
   data_rows: number;
   valid_rows: number;
@@ -68,6 +70,13 @@ type DataQuality = {
   warnings: string[];
 };
 
+type DataProcessing = {
+  rows_after_deduplication: number;
+  rows_used_for_kpi: number;
+  invalid_metric_rows_excluded: number;
+  invalid_metric_rows_excluded_by_metric: Record<string, number>;
+};
+
 type AnalysisSection = {
   summary: string;
   key_observations: string[];
@@ -77,7 +86,8 @@ type EvidenceKey =
   | "production"
   | "defects"
   | "defect_rate"
-  | "downtime";
+  | "downtime"
+  | "quality_score";
 
 type RiskArea = {
   entity_type:
@@ -87,7 +97,8 @@ type RiskArea = {
     | "supplier"
     | "batch"
     | "defect_type"
-    | "date";
+    | "date"
+    | "data_quality";
   entity_name: string;
   risk_level: "low" | "medium" | "high" | "critical";
   evidence_keys: EvidenceKey[];
@@ -98,6 +109,7 @@ type RiskArea = {
     defects?: number;
     defect_rate?: number;
     downtime?: number;
+    quality_score?: number;
   };
 };
 
@@ -144,6 +156,7 @@ type HardwareResult = {
   data_scope: DataScope;
 
   data_quality: DataQuality;
+  data_processing: DataProcessing;
   ai_analysis: AIAnalysis;
 };
 
@@ -731,6 +744,7 @@ export default function Home() {
                   totalProduction?.unit ||
                   "đơn vị"
                 }
+                description={totalProduction?.description}
               />
 
               <KPICard
@@ -739,13 +753,17 @@ export default function Home() {
                   defectRate
                     ? Number(
                         defectRate.value
-                      ).toFixed(2)
+                      ).toLocaleString("vi-VN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })
                     : "--"
                 }
                 unit={
                   defectRate?.unit ||
                   "%"
                 }
+                description={defectRate?.description}
               />
 
               <KPICard
@@ -763,6 +781,7 @@ export default function Home() {
                   totalDowntime?.unit ||
                   "phút"
                 }
+                description={totalDowntime?.description}
               />
 
               <KPICard
@@ -792,6 +811,7 @@ export default function Home() {
               dataQuality={
                 result.data_quality
               }
+              dataProcessing={result.data_processing}
             />
 
 
@@ -1244,10 +1264,12 @@ function KPICard({
   label,
   value,
   unit,
+  description,
 }: {
   label: string;
   value: string;
   unit: string;
+  description?: string;
 }) {
   return (
     <div className="kpi-card">
@@ -1264,6 +1286,12 @@ function KPICard({
         {unit}
       </span>
 
+      {description && (
+        <p className="kpi-description">
+          {description}
+        </p>
+      )}
+
     </div>
   );
 }
@@ -1276,49 +1304,36 @@ function KPICard({
 
 function DataQualityCard({
   dataQuality,
+  dataProcessing,
 }: {
   dataQuality: DataQuality;
+  dataProcessing: DataProcessing;
 }) {
   const score =
     Number(
       dataQuality?.quality_score ?? 0
     );
 
-  const getQualityStatus = () => {
-    if (score >= 95) {
-      return {
-        label: "Excellent Quality",
-        className: "quality-excellent",
-      };
-    }
-
-    if (score >= 85) {
-      return {
-        label: "Good Quality",
-        className: "quality-good",
-      };
-    }
-
-    if (score >= 70) {
-      return {
-        label: "Needs Review",
-        className: "quality-review",
-      };
-    }
-
-    return {
-      label: "Poor Quality",
+  const qualityStatuses = {
+    good: {
+      label: "Tốt",
+      className: "quality-good",
+    },
+    warning: {
+      label: "Cần lưu ý",
+      className: "quality-review",
+    },
+    poor: {
+      label: "Kém",
       className: "quality-poor",
-    };
+    },
   };
 
-  const qualityStatus =
-    getQualityStatus();
+  const qualityStatus = qualityStatuses[dataQuality.quality_status];
 
   const totalIssues =
     dataQuality.invalid_rows +
-    dataQuality.empty_rows +
-    dataQuality.duplicate_rows;
+    dataQuality.empty_rows;
 
   const hasProblems =
     totalIssues > 0 ||
@@ -1376,7 +1391,7 @@ function DataQualityCard({
 
   if (dataQuality.duplicate_rows > 0) {
     issueMessages.push(
-      `Có ${dataQuality.duplicate_rows} dòng trùng lặp.`
+      `Có ${dataQuality.duplicate_rows} dòng trùng lặp; các lần xuất hiện trùng sau bản ghi đầu đã được tính trong nhóm dòng không hợp lệ.`
     );
   }
 
@@ -1423,7 +1438,10 @@ function DataQualityCard({
         <div className="quality-score">
 
           <div className="quality-score-number">
-            {score.toFixed(0)}
+            {score.toLocaleString("vi-VN", {
+              minimumFractionDigits: 1,
+              maximumFractionDigits: 1,
+            })}
           </div>
 
           <div className="quality-score-total">
@@ -1440,8 +1458,8 @@ function DataQualityCard({
 
           <span>
             {hasProblems
-              ? "Data quality issues detected"
-              : "No data quality issues detected"}
+              ? "Dựa trên quy tắc kiểm tra chất lượng dữ liệu đầu vào"
+              : "Không phát hiện vấn đề theo các quy tắc kiểm tra"}
           </span>
 
         </div>
@@ -1453,29 +1471,86 @@ function DataQualityCard({
       <div className="quality-stats">
 
         <QualityStat
-          label="Records"
+          label="Tổng dòng ban đầu"
           value={dataQuality.total_rows}
         />
 
         <QualityStat
-          label="Valid"
+          label="Đánh giá hợp lệ"
           value={dataQuality.valid_rows}
         />
 
         <QualityStat
-          label="Invalid"
+          label="Đánh giá không hợp lệ"
           value={dataQuality.invalid_rows}
         />
 
         <QualityStat
-          label="Warnings"
-          value={
-            dataQuality.warnings?.length ?? 0
-          }
+          label="Dòng trùng (nằm trong không hợp lệ)"
+          value={dataQuality.duplicate_rows}
+        />
+
+        <QualityStat
+          label="Cảnh báo dữ liệu"
+          value={dataQuality.warnings?.length ?? 0}
         />
 
       </div>
 
+      <div className="processing-summary">
+        <div className="processing-summary-heading">
+          <div>
+            <strong>Lọc bản ghi để tính KPI</strong>
+            <span>
+              Quy trình này độc lập với đánh giá chất lượng dữ liệu ở trên.
+            </span>
+          </div>
+          <span className="processing-kpi-count">
+            {dataProcessing.rows_used_for_kpi.toLocaleString("vi-VN")} dùng tính KPI
+          </span>
+        </div>
+
+        <div className="processing-stats">
+          <QualityStat
+            label="Sau loại dòng trống/trùng"
+            value={dataProcessing.rows_after_deduplication}
+          />
+          <QualityStat
+            label="Được dùng tính KPI"
+            value={dataProcessing.rows_used_for_kpi}
+          />
+          <QualityStat
+            label="Bị loại khỏi KPI"
+            value={dataProcessing.invalid_metric_rows_excluded}
+          />
+        </div>
+
+        {dataProcessing.invalid_metric_rows_excluded > 0 && (
+          <div className="processing-reasons">
+            <span>Lý do theo metric</span>
+            <div>
+              {Object.entries(
+                dataProcessing.invalid_metric_rows_excluded_by_metric || {}
+              )
+                .filter(([, count]) => count > 0)
+                .map(([metric, count]) => (
+                  <span className="processing-reason" key={metric}>
+                    {metric}: {count.toLocaleString("vi-VN")} dòng
+                  </span>
+                ))}
+            </div>
+            <small>
+              Một dòng có thể xuất hiện ở nhiều metric nếu có nhiều giá trị không hợp lệ.
+            </small>
+          </div>
+        )}
+
+        <p className="quality-scoring-basis">
+          Điểm chất lượng = số dòng hợp lệ / số dòng dữ liệu × 100.
+          Dòng trống được loại khỏi mẫu chấm điểm; các lần xuất hiện trùng
+          sau bản ghi đầu được tính vào số dòng không hợp lệ.
+        </p>
+      </div>
 
 
       {hasProblems && (
@@ -1519,13 +1594,13 @@ function DataQualityCard({
         <div className="quality-success">
 
           <strong>
-            Dataset is ready for analysis.
+            Dữ liệu không có lỗi theo các quy tắc đánh giá chất lượng.
           </strong>
 
           <span>
-            {dataQuality.valid_rows} /{" "}
-            {dataQuality.total_rows} records
-            passed the data quality check.
+            {dataQuality.valid_rows} / {dataQuality.data_rows} dòng dữ liệu
+            được đánh giá hợp lệ; {dataProcessing.rows_used_for_kpi} dòng
+            được sử dụng để tính KPI.
           </span>
 
         </div>
@@ -1887,6 +1962,12 @@ function RiskAreasSection({
 
       </div>
 
+      <p className="risk-level-note">
+        Backend chuẩn hóa mức rủi ro theo ngưỡng đã cấu hình. Nếu chưa có
+        ngưỡng tương ứng, “Trung bình” là mức mặc định trung tính, không
+        phải kết luận về mức độ nghiêm trọng.
+      </p>
+
       {risks.length === 0 ? (
         <div className="empty-ai">
           Không phát hiện khu vực rủi ro nổi bật.
@@ -1930,6 +2011,7 @@ function RiskAreaCard({
     batch: "Batch",
     defect_type: "Loại lỗi",
     date: "Ngày",
+    data_quality: "Chất lượng dữ liệu",
   }[risk.entity_type];
 
   return (
@@ -1991,6 +2073,14 @@ function RiskAreaCard({
               label="Downtime"
               value={risk.evidence.downtime}
               unit="phút"
+            />
+          )}
+
+          {risk.evidence.quality_score !== undefined && (
+            <EvidenceItem
+              label="Điểm chất lượng dữ liệu"
+              value={risk.evidence.quality_score}
+              unit="/100"
             />
           )}
 
@@ -2058,6 +2148,8 @@ function EvidenceItem({
   const formattedValue =
     label === "Tỷ lệ lỗi"
       ? formatAIValue(value, "percent")
+      : label === "Điểm chất lượng dữ liệu"
+        ? formatAIValue(value, "number")
       : formatAIValue(value, "number");
 
   return (
@@ -2110,6 +2202,11 @@ function RecommendedActionsSection({
 
         <p>Recommended actions</p>
       </div>
+
+      <p className="risk-level-note">
+        Backend xác định mức ưu tiên theo ngưỡng nghiệp vụ đã cấu hình;
+        “Trung bình” là mức mặc định trung tính khi không có ngưỡng phù hợp.
+      </p>
 
       {actions.length === 0 ? (
         <div className="empty-ai">
