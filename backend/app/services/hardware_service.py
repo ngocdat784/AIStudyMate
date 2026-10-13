@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any
 
@@ -12,6 +13,10 @@ from app.config import settings
 from app.services.data_quality_service import (
     calculate_data_quality,
 )
+from app.services.anomaly_detection_service import (
+    detect_hardware_anomalies,
+)
+from app.services.gemini_retry import call_gemini_with_retry
 from app.services.hardware_ai_service import (
     _gemini_response_schema,
     analyze_hardware_deep,
@@ -60,6 +65,143 @@ class HardwareAnalysis(BaseModel):
         min_length=1,
         max_length=10,
     )
+
+
+AI_UNAVAILABLE_MESSAGE = (
+    "Dịch vụ AI hiện tạm thời không khả dụng. "
+    "Các chỉ số được tính bằng Python vẫn có thể sử dụng."
+)
+
+
+def is_temporary_ai_error(exc: Exception) -> bool:
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+
+    status_code = getattr(exc, "status_code", None)
+    if status_code is None:
+        status_code = getattr(exc, "code", None)
+    try:
+        if int(status_code) in {408, 429, 500, 502, 503, 504}:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "408",
+            "503",
+            "service_unavailable",
+            "high demand",
+            "429",
+            "resource_exhausted",
+            "500",
+            "502",
+            "504",
+        )
+    )
+
+
+def build_fallback_report(kpis: dict[str, Any]) -> dict[str, Any]:
+    metric_definitions = {
+        "total_production": (
+            "Tổng sản lượng",
+            "sản phẩm",
+            "Tổng sản lượng ghi nhận từ các bản ghi được sử dụng để tính KPI.",
+        ),
+        "total_defects": (
+            "Tổng số lỗi",
+            "lỗi",
+            "Tổng số lỗi ghi nhận từ các bản ghi được sử dụng để tính KPI.",
+        ),
+        "defect_rate": (
+            "Tỷ lệ lỗi tổng thể",
+            "%",
+            "Tỷ lệ lỗi tổng thể do Python tính toán.",
+        ),
+        "total_downtime": (
+            "Tổng downtime",
+            "phút",
+            "Tổng thời gian ngừng máy ghi nhận được, tính bằng phút.",
+        ),
+        "average_production_per_record": (
+            "Sản lượng trung bình mỗi bản ghi",
+            "sản phẩm/bản ghi",
+            "Giá trị do Python tính toán trên các bản ghi được sử dụng.",
+        ),
+        "record_count": (
+            "Số bản ghi",
+            "bản ghi",
+            "Số bản ghi được sử dụng để tính KPI.",
+        ),
+        "product_count": ("Số sản phẩm", "sản phẩm", "Số sản phẩm trong dữ liệu."),
+        "model_count": ("Số model", "model", "Số model trong dữ liệu."),
+        "component_count": (
+            "Số loại linh kiện xác định",
+            "loại",
+            "Số lượng loại linh kiện xác định, không bao gồm nhóm chưa xác định.",
+        ),
+        "supplier_count": (
+            "Số nhà cung cấp",
+            "nhà cung cấp",
+            "Số nhà cung cấp trong dữ liệu.",
+        ),
+        "batch_count": ("Số batch", "batch", "Số batch trong dữ liệu."),
+        "date_count": ("Số ngày", "ngày", "Số ngày có dữ liệu."),
+    }
+    fallback_kpis = []
+
+    for key, (name, unit, description) in metric_definitions.items():
+        value = kpis.get(key)
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        ):
+            fallback_kpis.append({
+                "name": name,
+                "value": value,
+                "unit": unit,
+                "description": description,
+            })
+
+    return {
+        "title": "Báo cáo phân tích phần cứng",
+        "summary": (
+            "Các chỉ số trong báo cáo được tính bằng Python. "
+            "Phần diễn giải do AI tạo hiện chưa khả dụng."
+        ),
+        "kpis": fallback_kpis,
+        "insights": [
+            "Sử dụng các KPI và kết quả anomaly_analysis do Python cung cấp; "
+            "chưa có nhận xét do AI tạo."
+        ],
+        "warnings": [AI_UNAVAILABLE_MESSAGE],
+        "recommendations": [
+            "Đối chiếu các KPI và phát hiện bất thường do Python tính toán; "
+            "thử tạo lại phần phân tích AI sau."
+        ],
+    }
+
+
+def build_fallback_deep_analysis() -> dict[str, Any]:
+    unavailable_section = {
+        "summary": "Phần phân tích chuyên sâu do AI tạo hiện chưa khả dụng.",
+        "key_observations": [],
+    }
+    return {
+        "executive_summary": dict(unavailable_section),
+        "production_analysis": dict(unavailable_section),
+        "quality_analysis": dict(unavailable_section),
+        "component_analysis": dict(unavailable_section),
+        "supplier_analysis": dict(unavailable_section),
+        "batch_analysis": dict(unavailable_section),
+        "downtime_analysis": dict(unavailable_section),
+        "risk_areas": [],
+        "recommended_actions": [],
+        "ai_status": "temporarily_unavailable",
+    }
 
 
 # =========================================================
@@ -1511,19 +1653,67 @@ def _normalize_generated_kpis(
 
 def generate_ai_insights(
     kpis: dict[str, Any],
+    anomalies: dict[str, Any] | None = None,
 ) -> HardwareAnalysis:
+
+    if anomalies is None:
+        anomalies = {
+            "status": "insufficient_data",
+            "findings": {},
+        }
+    context = {
+        "kpis": kpis,
+        "anomaly_analysis": anomalies,
+    }
+    context_json = json.dumps(
+        context,
+        ensure_ascii=False,
+        indent=2,
+        allow_nan=False,
+    )
 
     prompt = f"""
 Dưới đây là kết quả KPI đã được Python tính toán
 từ dữ liệu của một doanh nghiệp phần cứng.
 
-DỮ LIỆU KPI:
+DỮ LIỆU ĐẦU VÀO:
 
-{json.dumps(
-    kpis,
-    ensure_ascii=False,
-    indent=2,
-)}
+{context_json}
+
+QUY TẮC PHÂN TÍCH BẤT THƯỜNG
+
+1. anomaly_analysis là kết quả do Python tính toán theo quy tắc
+   xác định. Không tự tính lại, thay đổi hoặc phủ nhận các kết quả này.
+
+2. Chỉ giải thích các phát hiện được cung cấp trong
+   anomaly_analysis. Không tự tạo thêm batch, model, ngày,
+   tỷ lệ lỗi, ngưỡng hoặc số liệu.
+
+3. Phân biệt:
+   - Giá trị cao nhất/thấp nhất: kết quả xếp hạng.
+   - Ngoại lệ thống kê: kết quả vượt quy tắc phát hiện cụ thể.
+   - Chênh lệch lớn: kết quả so sánh với ngưỡng đã cấu hình.
+
+4. Nếu unusual_batch_defect_rate.detected là false,
+   không được tuyên bố rằng có batch bất thường theo quy tắc IQR,
+   kể cả khi một batch có tỷ lệ lỗi cao nhất.
+
+5. Nếu model_quality_difference.detected là false,
+   không được tuyên bố độ chênh lệch giữa model vượt ngưỡng
+   cấu hình. Vẫn có thể mô tả số liệu so sánh nếu được cung cấp.
+
+6. Không suy luận tương quan thành quan hệ nhân quả.
+   Không kết luận nhà cung cấp, linh kiện hoặc model là nguyên nhân
+   gây lỗi nếu dữ liệu không chứng minh được điều đó.
+
+7. Mỗi nhận định cần gắn với số liệu hoặc phát hiện cụ thể.
+   Nếu dữ liệu không đủ, phải nói rõ chưa đủ bằng chứng.
+
+8. Đề xuất hành động theo hướng kiểm tra, đối chiếu và thu thập thêm
+   bằng chứng; không khẳng định nguyên nhân gốc rễ chưa được xác minh.
+
+9. Không coi điểm chất lượng dữ liệu là tỷ lệ lỗi sản phẩm.
+   Không cộng các bản ghi bị loại trở lại KPI.
 
 Hãy tạo báo cáo Hardware Insights.
 
@@ -1727,18 +1917,20 @@ Recommendations = hành động nên xem xét.
 Chỉ trả về JSON đúng schema.
 """
 
-    interaction = get_client().interactions.create(
-        model=GEMINI_MODEL,
-        input=(
-            SYSTEM_INSTRUCTION
-            + "\n"
-            + prompt
+    interaction = call_gemini_with_retry(
+        lambda: get_client().interactions.create(
+            model=GEMINI_MODEL,
+            input=(
+                SYSTEM_INSTRUCTION
+                + "\n"
+                + prompt
+            ),
+            response_format={
+                "type": "text",
+                "mime_type": "application/json",
+                "schema": _gemini_response_schema(HardwareAnalysis),
+            },
         ),
-        response_format={
-            "type": "text",
-            "mime_type": "application/json",
-            "schema": _gemini_response_schema(HardwareAnalysis),
-        },
     )
 
     if not interaction.output_text:
@@ -1782,11 +1974,23 @@ def analyze_hardware_dataframe(
         dataframe
     )
 
-    analysis = generate_ai_insights(
-        kpis
-    )
+    anomalies = detect_hardware_anomalies(kpis)
 
-    result = analysis.model_dump()
+    ai_unavailable = False
+    insights_available = True
+
+    try:
+        analysis = generate_ai_insights(
+            kpis,
+            anomalies=anomalies,
+        )
+        result = analysis.model_dump()
+    except Exception as exc:
+        if not is_temporary_ai_error(exc):
+            raise
+        insights_available = False
+        ai_unavailable = True
+        result = build_fallback_report(kpis)
 
     for section in (
         "product_performance",
@@ -1809,7 +2013,29 @@ def analyze_hardware_dataframe(
             ) else [],
         )
 
-    deep_ai = analyze_hardware_deep(kpis)
-    result["ai_analysis"] = deep_ai
+    result["anomaly_analysis"] = anomalies
+
+    deep_available = True
+    try:
+        result["ai_analysis"] = analyze_hardware_deep(
+            kpis,
+            anomalies=anomalies,
+        )
+    except Exception as exc:
+        if not is_temporary_ai_error(exc):
+            raise
+        deep_available = False
+        ai_unavailable = True
+        result["ai_analysis"] = build_fallback_deep_analysis()
+
+    if ai_unavailable:
+        result["ai_status"] = (
+            "partially_unavailable"
+            if insights_available or deep_available
+            else "temporarily_unavailable"
+        )
+        result["ai_error"] = AI_UNAVAILABLE_MESSAGE
+    else:
+        result["ai_status"] = "available"
 
     return result

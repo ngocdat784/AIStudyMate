@@ -10,6 +10,7 @@ from google import genai
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
+from app.services.gemini_retry import call_gemini_with_retry
 
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
@@ -217,7 +218,10 @@ def _clean_for_json(value: Any) -> Any:
     return str(value)
 
 
-def _build_ai_context(report: dict) -> dict:
+def _build_ai_context(
+    report: dict,
+    anomalies: dict | None = None,
+) -> dict:
     """
     Chuẩn hóa dữ liệu KPI Python tính toán trước khi gửi Gemini.
     report là kết quả trực tiếp của calculate_hardware_kpis().
@@ -266,6 +270,12 @@ def _build_ai_context(report: dict) -> dict:
 
     context = {
         "metrics": metrics,
+        "anomaly_analysis": _clean_for_json(
+            anomalies if anomalies is not None else {
+                "status": "insufficient_data",
+                "findings": {},
+            }
+        ),
         "measurement_units": {
             "defect_rate": "%",
             "downtime": "phút",
@@ -425,6 +435,41 @@ def _build_prompt(context: dict) -> str:
     return f"""
 Bạn là chuyên gia phân tích dữ liệu sản xuất phần cứng,
 chất lượng sản phẩm và hiệu suất vận hành nhà máy.
+
+QUY TẮC PHÂN TÍCH BẤT THƯỜNG
+
+1. anomaly_analysis là kết quả do Python tính toán theo quy tắc
+   xác định. Không tự tính lại, thay đổi hoặc phủ nhận các kết quả này.
+
+2. Chỉ giải thích các phát hiện được cung cấp trong
+   anomaly_analysis. Không tự tạo thêm batch, model, ngày,
+   tỷ lệ lỗi, ngưỡng hoặc số liệu.
+
+3. Phân biệt:
+   - Giá trị cao nhất/thấp nhất: kết quả xếp hạng.
+   - Ngoại lệ thống kê: kết quả vượt quy tắc phát hiện cụ thể.
+   - Chênh lệch lớn: kết quả so sánh với ngưỡng đã cấu hình.
+
+4. Nếu unusual_batch_defect_rate.detected là false,
+   không được tuyên bố rằng có batch bất thường theo quy tắc IQR,
+   kể cả khi một batch có tỷ lệ lỗi cao nhất.
+
+5. Nếu model_quality_difference.detected là false,
+   không được tuyên bố độ chênh lệch giữa model vượt ngưỡng
+   cấu hình. Vẫn có thể mô tả số liệu so sánh nếu được cung cấp.
+
+6. Không suy luận tương quan thành quan hệ nhân quả.
+   Không kết luận nhà cung cấp, linh kiện hoặc model là nguyên nhân
+   gây lỗi nếu dữ liệu không chứng minh được điều đó.
+
+7. Mỗi nhận định cần gắn với số liệu hoặc phát hiện cụ thể.
+   Nếu dữ liệu không đủ, phải nói rõ chưa đủ bằng chứng.
+
+8. Đề xuất hành động theo hướng kiểm tra, đối chiếu và thu thập thêm
+   bằng chứng; không khẳng định nguyên nhân gốc rễ chưa được xác minh.
+
+9. Không coi điểm chất lượng dữ liệu là tỷ lệ lỗi sản phẩm.
+   Không cộng các bản ghi bị loại trở lại KPI.
 
 MỤC TIÊU
 Phân tích dữ liệu được cung cấp để tạo báo cáo quản trị rõ ràng,
@@ -1191,7 +1236,10 @@ def _normalize_risk_levels(
 # MAIN AI FUNCTION
 # ============================================================
 
-def analyze_hardware_deep(report: dict) -> dict:
+def analyze_hardware_deep(
+    report: dict,
+    anomalies: dict | None = None,
+) -> dict:
     """
     Tạo báo cáo phân tích chuyên sâu bằng Gemini.
 
@@ -1204,17 +1252,22 @@ def analyze_hardware_deep(report: dict) -> dict:
             "report phải là dictionary chứa kết quả phân tích."
         )
 
-    context = _build_ai_context(report)
+    context = _build_ai_context(
+        report,
+        anomalies=anomalies,
+    )
     prompt = _build_prompt(context)
 
-    response = get_client().models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config={
-            "response_mime_type": "application/json",
-            "response_schema": _gemini_response_schema(DeepAIAnalysis),
-            "temperature": 0.2,
-        },
+    response = call_gemini_with_retry(
+        lambda: get_client().models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json",
+                "response_schema": _gemini_response_schema(DeepAIAnalysis),
+                "temperature": 0.2,
+            },
+        )
     )
 
     response_text = getattr(response, "text", None)

@@ -3,9 +3,11 @@ import unittest
 from unittest.mock import Mock, patch
 
 import pandas as pd
+from google.genai import errors
 from pydantic import ValidationError
 
 from app.services import hardware_service
+from app.services.gemini_retry import call_gemini_with_retry
 from app.services.hardware_ai_service import (
     DeepAIAnalysis,
     RecommendedAction,
@@ -26,6 +28,49 @@ from app.services.hardware_ai_service import (
 
 
 class HardwareAnalysisTests(unittest.TestCase):
+    def test_gemini_retry_retries_temporary_api_errors(self):
+        response = Mock(output_text="ok")
+        operation = Mock(
+            side_effect=[
+                errors.APIError(503, {"error": {"message": "busy"}}),
+                response,
+            ]
+        )
+
+        with patch("app.services.gemini_retry.time.sleep") as sleep:
+            result = call_gemini_with_retry(operation)
+
+        self.assertIs(result, response)
+        self.assertEqual(operation.call_count, 2)
+        sleep.assert_called_once()
+
+    def test_gemini_retry_does_not_retry_non_temporary_api_errors(self):
+        error = errors.APIError(400, {"error": {"message": "bad request"}})
+        operation = Mock(side_effect=error)
+
+        with patch("app.services.gemini_retry.time.sleep") as sleep:
+            with self.assertRaises(errors.APIError) as raised:
+                call_gemini_with_retry(operation)
+
+        self.assertIs(raised.exception, error)
+        operation.assert_called_once_with()
+        sleep.assert_not_called()
+
+    def test_gemini_retry_stops_after_max_attempts(self):
+        operation = Mock(
+            side_effect=errors.APIError(
+                503,
+                {"error": {"message": "service unavailable"}},
+            )
+        )
+
+        with patch("app.services.gemini_retry.time.sleep") as sleep:
+            with self.assertRaises(errors.APIError):
+                call_gemini_with_retry(operation, max_attempts=3)
+
+        self.assertEqual(operation.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
     def test_deep_analysis_schema_rejects_unexpected_fields(self):
         with self.assertRaises(ValidationError):
             DeepAIAnalysis.model_validate(
@@ -271,14 +316,28 @@ class HardwareAnalysisTests(unittest.TestCase):
         client.interactions.create.return_value = Mock(
             output_text=json.dumps(gemini_response, ensure_ascii=False)
         )
+        anomalies = {
+            "status": "completed",
+            "findings": {"model_quality_difference": {"detected": False}},
+        }
 
         with patch.object(
             hardware_service,
             "get_client",
             return_value=client,
         ):
-            analysis = hardware_service.generate_ai_insights(source_kpis)
+            analysis = hardware_service.generate_ai_insights(
+                source_kpis,
+                anomalies=anomalies,
+            )
 
+        prompt = client.interactions.create.call_args.kwargs["input"]
+        self.assertIn('"anomaly_analysis":', prompt)
+        self.assertIn('"detected": false', prompt)
+        self.assertIn(
+            "Không tự tính lại, thay đổi hoặc phủ nhận các kết quả này.",
+            prompt,
+        )
         production, defects, overall_defect_rate, downtime, defect_rate, component_count = analysis.kpis
         self.assertEqual(production.value, 13000)
         self.assertEqual(
@@ -371,6 +430,13 @@ class HardwareAnalysisTests(unittest.TestCase):
         )
 
     def test_deep_prompt_requires_percentages_and_explains_row_counts(self):
+        anomalies = {
+            "status": "completed",
+            "findings": {
+                "unusual_batch_defect_rate": {"detected": False},
+                "model_quality_difference": {"detected": False},
+            },
+        }
         prompt = _build_prompt(
             _build_ai_context(
                 {
@@ -383,13 +449,20 @@ class HardwareAnalysisTests(unittest.TestCase):
                         "rows_used_for_kpi": 12,
                         "invalid_metric_rows_excluded": 6,
                     },
-                }
+                },
+                anomalies=anomalies,
             )
         )
 
         self.assertIn("2.05 trong dữ liệu phải viết là 2,05%", prompt)
         self.assertIn("Mọi giá trị downtime trong dữ liệu được tính bằng phút", prompt)
         self.assertIn("rows_used_for_kpi có thể lớn hơn valid_rows", prompt)
+        self.assertIn('"anomaly_analysis":', prompt)
+        self.assertIn('"detected": false', prompt)
+        self.assertIn(
+            "không được tuyên bố rằng có batch bất thường theo quy tắc IQR",
+            prompt,
+        )
 
     def test_summary_calls_kpi_rows_used_not_universally_valid(self):
         summary = "Dữ liệu gồm 12 bản ghi hợp lệ."
@@ -847,6 +920,10 @@ class HardwareAnalysisTests(unittest.TestCase):
         self.assertEqual(context["data_quality"], {})
         self.assertEqual(context["data_processing"], {})
         self.assertIsNone(context["highest_defect_supplier"])
+        self.assertEqual(
+            context["anomaly_analysis"],
+            {"status": "insufficient_data", "findings": {}},
+        )
 
     def test_entities_and_rows_are_scoped_to_entity_type(self):
         report = {
@@ -1046,21 +1123,83 @@ class HardwareAnalysisTests(unittest.TestCase):
 
         self.assertEqual(validated.risk_areas, [])
 
-    def test_deep_analysis_receives_raw_kpi_dictionary(self):
+    def test_temporary_gemini_errors_keep_python_report_available(self):
         raw_kpis = {
             "total_production": 100,
-            "product_performance": [],
+            "total_defects": 2,
+            "defect_rate": 2.0,
+            "product_performance": [
+                {"product": "Widget A", "production": 100}
+            ],
+            "data_quality": {"quality_score": 95.0},
         }
-        hardware_insights = Mock()
-        hardware_insights.model_dump.return_value = {
-            "kpis": [{"name": "wrong-shaped-source"}]
+        anomalies = {
+            "status": "completed",
+            "findings": {"model_quality_difference": {"detected": False}},
         }
-
         with (
             patch.object(
                 hardware_service,
                 "calculate_hardware_kpis",
                 return_value=raw_kpis,
+            ),
+            patch.object(
+                hardware_service,
+                "detect_hardware_anomalies",
+                return_value=anomalies,
+            ),
+            patch.object(
+                hardware_service,
+                "generate_ai_insights",
+                side_effect=RuntimeError(
+                    "Error code: 503 service_unavailable high demand"
+                ),
+            ),
+            patch.object(
+                hardware_service,
+                "analyze_hardware_deep",
+                side_effect=TimeoutError("Request timed out"),
+            ),
+        ):
+            result = hardware_service.analyze_hardware_dataframe(
+                pd.DataFrame({"Production": [100]})
+            )
+
+        self.assertEqual(result["ai_status"], "temporarily_unavailable")
+        self.assertEqual(
+            result["ai_error"],
+            hardware_service.AI_UNAVAILABLE_MESSAGE,
+        )
+        self.assertEqual(result["kpis"][0]["value"], 100)
+        self.assertEqual(result["product_performance"], raw_kpis["product_performance"])
+        self.assertEqual(result["data_quality"], raw_kpis["data_quality"])
+        self.assertEqual(result["anomaly_analysis"], anomalies)
+        self.assertEqual(
+            result["ai_analysis"]["ai_status"],
+            "temporarily_unavailable",
+        )
+
+    def test_deep_gemini_error_marks_response_partially_unavailable(self):
+        raw_kpis = {"total_production": 100}
+        hardware_insights = Mock()
+        hardware_insights.model_dump.return_value = {
+            "title": "Báo cáo",
+            "summary": "Đã phân tích.",
+            "kpis": [],
+            "insights": ["Insight"],
+            "warnings": [],
+            "recommendations": ["Action"],
+        }
+        with (
+            patch.object(
+                hardware_service,
+                "calculate_hardware_kpis",
+                return_value=raw_kpis,
+            ),
+            patch.object(
+                hardware_service,
+                "detect_hardware_anomalies",
+                return_value={"status": "completed", "findings": {}},
             ),
             patch.object(
                 hardware_service,
@@ -1070,14 +1209,105 @@ class HardwareAnalysisTests(unittest.TestCase):
             patch.object(
                 hardware_service,
                 "analyze_hardware_deep",
-                return_value={"risk_areas": []},
+                side_effect=RuntimeError("503 service_unavailable"),
+            ),
+        ):
+            result = hardware_service.analyze_hardware_dataframe(
+                pd.DataFrame({"Production": [100]})
+            )
+
+        self.assertEqual(result["ai_status"], "partially_unavailable")
+        self.assertEqual(result["insights"], ["Insight"])
+        self.assertEqual(
+            result["ai_analysis"]["ai_status"],
+            "temporarily_unavailable",
+        )
+
+    def test_non_temporary_ai_error_is_not_suppressed(self):
+        with (
+            patch.object(
+                hardware_service,
+                "calculate_hardware_kpis",
+                return_value={"total_production": 100},
+            ),
+            patch.object(
+                hardware_service,
+                "detect_hardware_anomalies",
+                return_value={"status": "completed", "findings": {}},
+            ),
+            patch.object(
+                hardware_service,
+                "generate_ai_insights",
+                side_effect=ValueError("Invalid Gemini response"),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "Invalid Gemini response",
+            ):
+                hardware_service.analyze_hardware_dataframe(
+                    pd.DataFrame({"Production": [100]})
+                )
+
+    def test_deep_analysis_receives_raw_kpi_dictionary(self):
+        raw_kpis = {
+            "total_production": 100,
+            "product_performance": [],
+        }
+        anomalies = {
+            "status": "completed",
+            "findings": {"largest_daily_change": {"detected": False}},
+        }
+        hardware_insights = Mock()
+        hardware_insights.model_dump.return_value = {
+            "kpis": [{"name": "wrong-shaped-source"}]
+        }
+        call_order = []
+
+        with (
+            patch.object(
+                hardware_service,
+                "calculate_hardware_kpis",
+                return_value=raw_kpis,
+            ),
+            patch.object(
+                hardware_service,
+                "detect_hardware_anomalies",
+                side_effect=lambda kpis: (
+                    call_order.append(("detect", kpis)) or anomalies
+                ),
+            ),
+            patch.object(
+                hardware_service,
+                "generate_ai_insights",
+                side_effect=lambda kpis, anomalies=None: (
+                    call_order.append(("insights", kpis, anomalies))
+                    or hardware_insights
+                ),
+            ) as ai_insights,
+            patch.object(
+                hardware_service,
+                "analyze_hardware_deep",
+                side_effect=lambda kpis, anomalies=None: (
+                    call_order.append(("deep", kpis, anomalies))
+                    or {"risk_areas": []}
+                ),
             ) as deep_analysis,
         ):
             result = hardware_service.analyze_hardware_dataframe(
                 pd.DataFrame({"Production": [100]})
             )
 
-        deep_analysis.assert_called_once_with(raw_kpis)
+        self.assertEqual(
+            [call[0] for call in call_order],
+            ["detect", "insights", "deep"],
+        )
+        ai_insights.assert_called_once_with(raw_kpis, anomalies=anomalies)
+        deep_analysis.assert_called_once_with(
+            raw_kpis,
+            anomalies=anomalies,
+        )
+        self.assertEqual(result["anomaly_analysis"], anomalies)
         self.assertEqual(result["ai_analysis"], {"risk_areas": []})
 
 
