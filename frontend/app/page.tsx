@@ -77,6 +77,57 @@ type DataProcessing = {
   invalid_metric_rows_excluded_by_metric: Record<string, number>;
 };
 
+type GroupExtreme = {
+  entity: string;
+  value: number;
+  unit: "percent" | "minutes" | "units";
+  comparison_count: number;
+};
+
+type DailyChangeFinding = {
+  detected: boolean;
+  from_date?: string;
+  to_date?: string;
+  previous_production?: number;
+  current_production?: number;
+  change?: number;
+  direction?: "increase" | "decrease" | "unchanged";
+  reason?: string;
+};
+
+type BatchOutlierFinding = {
+  entity: string;
+  defect_rate: number;
+};
+
+type BatchAnomalyFinding = {
+  detected: boolean;
+  outliers: BatchOutlierFinding[];
+  reason?: string;
+};
+
+type ModelDifferenceFinding = {
+  detected: boolean;
+  lowest_model?: string;
+  lowest_defect_rate?: number;
+  highest_model?: string;
+  highest_defect_rate?: number;
+  spread_percentage_points?: number;
+  reason?: string;
+};
+
+type AnomalyAnalysis = {
+  status: "completed" | "insufficient_data";
+  findings: {
+    highest_defect_rate?: Record<string, GroupExtreme>;
+    highest_downtime?: Record<string, GroupExtreme>;
+    lowest_production?: Record<string, GroupExtreme>;
+    largest_daily_change?: DailyChangeFinding;
+    unusual_batch_defect_rate?: BatchAnomalyFinding;
+    model_quality_difference?: ModelDifferenceFinding;
+  };
+};
+
 type AnalysisSection = {
   summary: string;
   key_observations: string[];
@@ -157,6 +208,7 @@ type HardwareResult = {
 
   data_quality: DataQuality;
   data_processing: DataProcessing;
+  anomaly_analysis: AnomalyAnalysis;
   ai_analysis: AIAnalysis;
 };
 
@@ -812,6 +864,9 @@ export default function Home() {
                 result.data_quality
               }
               dataProcessing={result.data_processing}
+              hasDefectTypeData={
+                result.data_scope.has_defect_type_data
+              }
             />
 
 
@@ -1207,13 +1262,18 @@ export default function Home() {
                 analysis={result.ai_analysis.downtime_analysis}
               />
 
-              <RiskAreasSection
+              <AnomalyHighlightsSection
                 number="20"
+                anomalyAnalysis={result.anomaly_analysis}
+              />
+
+              <RiskAreasSection
+                number="21"
                 risks={result.ai_analysis.risk_areas}
               />
 
               <RecommendedActionsSection
-                number="21"
+                number="22"
                 actions={result.ai_analysis.recommended_actions}
               />
 
@@ -1305,9 +1365,11 @@ function KPICard({
 function DataQualityCard({
   dataQuality,
   dataProcessing,
+  hasDefectTypeData,
 }: {
   dataQuality: DataQuality;
   dataProcessing: DataProcessing;
+  hasDefectTypeData: boolean;
 }) {
   const score =
     Number(
@@ -1550,7 +1612,13 @@ function DataQualityCard({
           Dòng trống được loại khỏi mẫu chấm điểm; các lần xuất hiện trùng
           sau bản ghi đầu được tính vào số dòng không hợp lệ.
         </p>
-      </div>
+
+        <p className="quality-optional-field-note">
+          {hasDefectTypeData
+            ? 'Defect_Type là trường tùy chọn, không ảnh hưởng đến số dòng hợp lệ. Giá trị loại lỗi bị thiếu được gom vào nhóm "Không xác định" trong phân tích loại lỗi.'
+            : "Dữ liệu không có cột Defect_Type; trường này không thuộc các điều kiện chấm điểm chất lượng dữ liệu."}
+        </p>
+        </div>
 
 
       {hasProblems && (
@@ -1932,6 +2000,192 @@ function AIAnalysisSection({
         </div>
       )}
 
+    </section>
+  );
+}
+
+
+
+function AnomalyHighlightsSection({
+  number,
+  anomalyAnalysis,
+}: {
+  number: string;
+  anomalyAnalysis: AnomalyAnalysis;
+}) {
+  const findings = anomalyAnalysis.findings;
+  const groupLabels: Record<string, string> = {
+    product: "Sản phẩm",
+    model: "Model",
+    component: "Linh kiện",
+    supplier: "Nhà cung cấp",
+    batch: "Batch",
+  };
+  const highlights: {
+    key: string;
+    title: string;
+    description: string;
+    type: "ranking" | "rule";
+  }[] = [];
+
+  const addGroupFindings = (
+    source: Record<string, GroupExtreme> | undefined,
+    metric: "defect_rate" | "downtime" | "production"
+  ) => {
+    Object.entries(source ?? {}).forEach(([group, finding]) => {
+      const groupLabel = groupLabels[group] ?? group;
+      const value = finding.value.toLocaleString("vi-VN", {
+        maximumFractionDigits: 2,
+      });
+      const title =
+        metric === "defect_rate"
+          ? `Tỷ lệ lỗi cao nhất · ${groupLabel}`
+          : metric === "downtime"
+            ? `Downtime cao nhất · ${groupLabel}`
+            : `Sản lượng thấp nhất · ${groupLabel}`;
+      const description =
+        metric === "defect_rate"
+          ? `${finding.entity}: ${value}%. Đây là thứ hạng trong dữ liệu, không tự chứng minh nguyên nhân gây lỗi.`
+          : metric === "downtime"
+            ? `${finding.entity}: ${value} phút. Đây là thứ hạng trong dữ liệu, không tự xác định nguyên nhân downtime.`
+            : `${finding.entity}: ${value} đơn vị. Đây là thứ hạng trong dữ liệu.`;
+
+      highlights.push({
+        key: `${metric}-${group}-${finding.entity}`,
+        title,
+        description,
+        type: "ranking",
+      });
+    });
+  };
+
+  addGroupFindings(findings.highest_defect_rate, "defect_rate");
+  addGroupFindings(findings.highest_downtime, "downtime");
+  addGroupFindings(findings.lowest_production, "production");
+
+  const dailyChange = findings.largest_daily_change;
+  if (
+    dailyChange?.detected &&
+    dailyChange.from_date &&
+    dailyChange.to_date &&
+    dailyChange.previous_production !== undefined &&
+    dailyChange.current_production !== undefined
+  ) {
+    const directionLabel = {
+      increase: "tăng",
+      decrease: "giảm",
+      unchanged: "không đổi",
+    }[dailyChange.direction ?? "unchanged"];
+    const changeAmount =
+      dailyChange.change === undefined
+        ? ""
+        : ` (${dailyChange.change > 0 ? "+" : ""}${dailyChange.change.toLocaleString("vi-VN")} đơn vị)`;
+    highlights.push({
+      key: "largest-daily-change",
+      title: "Thay đổi sản lượng lớn nhất giữa hai ngày liên tiếp",
+      description:
+        `Từ ${dailyChange.from_date} đến ${dailyChange.to_date}, sản lượng ${directionLabel} từ ${dailyChange.previous_production.toLocaleString("vi-VN")} đến ${dailyChange.current_production.toLocaleString("vi-VN")} đơn vị${changeAmount}.`,
+      type: "ranking",
+    });
+  }
+
+  const batchFinding = findings.unusual_batch_defect_rate;
+  if (batchFinding?.detected) {
+    batchFinding.outliers.forEach((outlier) => {
+      highlights.push({
+        key: `batch-outlier-${outlier.entity}`,
+        title: "Batch ngoài ngưỡng IQR",
+        description:
+          `${outlier.entity}: tỷ lệ lỗi ${outlier.defect_rate.toLocaleString("vi-VN", { maximumFractionDigits: 2 })}%. Đây là phát hiện thống kê, không phải kết luận nguyên nhân.`,
+        type: "rule",
+      });
+    });
+  }
+
+  const modelFinding = findings.model_quality_difference;
+  if (
+    modelFinding?.detected &&
+    modelFinding.lowest_model &&
+    modelFinding.highest_model &&
+    modelFinding.spread_percentage_points !== undefined
+  ) {
+    highlights.push({
+      key: "model-quality-difference",
+      title: "Chênh lệch tỷ lệ lỗi giữa các model vượt ngưỡng",
+      description:
+        `${modelFinding.lowest_model} đến ${modelFinding.highest_model}: chênh ${modelFinding.spread_percentage_points.toLocaleString("vi-VN", { maximumFractionDigits: 2 })} điểm phần trăm.`,
+      type: "rule",
+    });
+  }
+
+  const ruleNotes = [
+    ...(dailyChange?.detected === false && dailyChange.reason
+      ? [`Biến động theo ngày: ${dailyChange.reason}`]
+      : []),
+    ...(batchFinding?.detected === false && batchFinding.reason
+      ? [`Ngoại lệ batch (IQR): ${batchFinding.reason}`]
+      : []),
+    ...(modelFinding?.detected === false && modelFinding.reason
+      ? [`Chênh lệch model: ${modelFinding.reason}`]
+      : []),
+  ];
+
+  return (
+    <section className="dashboard-card anomaly-highlights-card">
+      <div className="dashboard-card-header">
+        <div>
+          <div className="ai-section-title">
+            <span>{number}</span>
+            <h3>Phát hiện và thứ hạng đáng chú ý</h3>
+          </div>
+        </div>
+        <p>Python anomaly analysis</p>
+      </div>
+
+      <p className="anomaly-guidance">
+        Các phát hiện dưới đây được đưa vào để AI cân nhắc khi lập khuyến nghị.
+        Không phải mỗi phát hiện đều cần một hành động riêng; thứ hạng cao nhất
+        không đồng nghĩa với ngoại lệ thống kê hay nguyên nhân đã được xác nhận.
+      </p>
+
+      {anomalyAnalysis.status !== "completed" ? (
+        <div className="empty-ai">
+          Chưa đủ dữ liệu để hoàn tất phân tích bất thường.
+        </div>
+      ) : (
+        <>
+          {highlights.length > 0 ? (
+            <div className="anomaly-highlight-list">
+              {highlights.map((highlight) => (
+                <article
+                  className={`anomaly-highlight anomaly-${highlight.type}`}
+                  key={highlight.key}
+                >
+                  <span className="anomaly-highlight-type">
+                    {highlight.type === "rule"
+                      ? "Phát hiện theo quy tắc"
+                      : "Thứ hạng"}
+                  </span>
+                  <h4>{highlight.title}</h4>
+                  <p>{highlight.description}</p>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-ai">
+              Không có thứ hạng hoặc phát hiện bất thường đủ dữ liệu để hiển thị.
+            </div>
+          )}
+
+          {ruleNotes.length > 0 && (
+            <div className="anomaly-rule-notes">
+              {ruleNotes.map((note) => (
+                <p key={note}>{note}</p>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </section>
   );
 }

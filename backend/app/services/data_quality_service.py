@@ -185,6 +185,7 @@ def calculate_data_quality(
     - Duplicate occurrences after the first are also invalid rows.
     - A row with multiple issues is counted only once in invalid_rows.
     - Missing entire required columns are reported separately.
+    - Only fields in FIELD_LABELS are required for data-quality scoring.
     """
 
     if dataframe.empty:

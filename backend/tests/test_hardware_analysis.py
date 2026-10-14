@@ -7,6 +7,7 @@ from google.genai import errors
 from pydantic import ValidationError
 
 from app.services import hardware_service
+from app.services.data_quality_service import calculate_data_quality
 from app.services.gemini_retry import call_gemini_with_retry
 from app.services.hardware_ai_service import (
     DeepAIAnalysis,
@@ -16,6 +17,8 @@ from app.services.hardware_ai_service import (
     _build_prompt,
     _find_entity_row,
     _get_entities,
+    _normalize_group_analysis_observations,
+    _normalize_aggregate_defect_rate_wording,
     _normalize_risk_levels,
     _normalize_recommendation_priorities,
     _gemini_response_schema,
@@ -229,6 +232,44 @@ class HardwareAnalysisTests(unittest.TestCase):
             )
         )
 
+    def test_missing_defect_type_is_not_a_data_quality_violation(self):
+        row = {
+            "Product": "Product A",
+            "Model": "Model A",
+            "Component": "GPU",
+            "Supplier": "Supplier A",
+            "Batch": "B016",
+            "Production": 100,
+            "Defects": 2,
+            "Downtime": 1,
+            "Date": "2026-10-03",
+        }
+        rows = [
+            {**row, "Defect_Type": None},
+            {
+                **row,
+                "Batch": "B017",
+                "Date": "2026-10-04",
+                "Defect_Type": "Scratch",
+            },
+        ]
+
+        quality = calculate_data_quality(pd.DataFrame(rows))
+
+        self.assertEqual(quality["valid_rows"], 2)
+        self.assertEqual(quality["invalid_rows"], 0)
+        self.assertNotIn("Defect_Type", quality["missing_values"])
+
+    def test_aggregate_defect_rate_is_not_called_an_average(self):
+        normalized = _normalize_aggregate_defect_rate_wording(
+            "Tổng lỗi là 231, tỷ lệ lỗi trung bình 1,78%."
+        )
+
+        self.assertEqual(
+            normalized,
+            "Tổng lỗi là 231, tỷ lệ lỗi tổng thể 1,78%.",
+        )
+
     def test_component_count_excludes_unidentified_group(self):
         dataframe = pd.DataFrame(
             {
@@ -424,9 +465,101 @@ class HardwareAnalysisTests(unittest.TestCase):
         self.assertEqual(len(normalized.quality_analysis.key_observations), 2)
         self.assertEqual(
             normalized.quality_analysis.key_observations[1],
-            "Có 6 dòng bị loại khỏi tính KPI; nguyên nhân theo metric: "
+            "Có 6 dòng bị loại khỏi tính KPI; số dòng theo từng metric: "
             "Production không hợp lệ ở 6 dòng, Defects không hợp lệ ở "
-            "1 dòng. Một dòng có thể xuất hiện ở nhiều nhóm nguyên nhân.",
+            "1 dòng. Các nhóm metric có thể chồng lấp; không cộng các số "
+            "này để tính tổng dòng bị loại.",
+        )
+
+    def test_group_observations_use_python_metrics_and_keep_scope_distinct(self):
+        analysis = DeepAIAnalysis(
+            executive_summary={"summary": "Tóm tắt."},
+            production_analysis={"summary": "Sản xuất."},
+            quality_analysis={
+                "summary": "Chất lượng.",
+                "key_observations": [
+                    "GPU có tỷ lệ lỗi 8,00% và 58 lỗi."
+                ],
+            },
+            component_analysis={
+                "summary": "Linh kiện.",
+                "key_observations": [
+                    "Nhóm Không xác định có sản lượng 8.000 đơn vị.",
+                    "GPU có tỷ lệ lỗi 8,00%.",
+                ],
+            },
+            supplier_analysis={
+                "summary": "Nhà cung cấp.",
+                "key_observations": [
+                    "Supplier A có tỷ lệ lỗi 9,99%."
+                ],
+            },
+            batch_analysis={"summary": "Lô sản xuất."},
+            downtime_analysis={"summary": "Thời gian dừng."},
+        )
+        context = {
+            "metrics": {"supplier_count": 4, "date_count": 5},
+            "component_performance": [
+                {
+                    "component": "Không xác định",
+                    "production": 800,
+                    "defects": 8,
+                    "defect_rate": 1.0,
+                },
+                {
+                    "component": "GPU",
+                    "production": 2900,
+                    "defects": 58,
+                    "defect_rate": 2.0,
+                },
+            ],
+            "highest_defect_component": {
+                "component": "GPU",
+                "defect_rate": 2.0,
+            },
+            "highest_defect_supplier": {
+                "supplier": "Supplier A",
+                "defect_rate": 2.05,
+            },
+            "defect_type_analysis": [
+                {"defect_type": "GPU", "defects": 58},
+                {"defect_type": "Scratch", "defects": 12},
+            ],
+        }
+
+        normalized = _normalize_group_analysis_observations(
+            analysis,
+            context,
+        )
+
+        self.assertEqual(
+            normalized.component_analysis.key_observations,
+            [
+                'Theo component_performance, nhóm linh kiện '
+                '"Không xác định" có sản lượng 800 đơn vị.',
+                'Theo component_performance, linh kiện "GPU" có tỷ lệ lỗi '
+                "cao nhất trong các linh kiện được xác định, ở mức 2,00%. "
+                "Đây là tỷ lệ lỗi theo linh kiện, không phải số lỗi theo "
+                "loại lỗi.",
+            ],
+        )
+        self.assertEqual(
+            normalized.quality_analysis.key_observations,
+            [
+                'Theo defect_type_analysis, loại lỗi "GPU" có 58 lỗi, '
+                "nhiều nhất theo số lượng lỗi giữa các loại lỗi; đây không "
+                "phải tỷ lệ lỗi theo linh kiện."
+            ],
+        )
+        self.assertEqual(
+            normalized.supplier_analysis.key_observations,
+            [
+                "Supplier A có tỷ lệ lỗi cao nhất trong tập dữ liệu hiện "
+                "tại gồm 4 nhà cung cấp và 5 ngày sản xuất, ở mức 2,05%. "
+                "Đây chỉ là thứ hạng mô tả dữ liệu hiện có, chưa đủ bằng "
+                "chứng để kết luận nhà cung cấp kém chất lượng hoặc gây ra "
+                "lỗi."
+            ],
         )
 
     def test_deep_prompt_requires_percentages_and_explains_row_counts(self):
@@ -461,6 +594,22 @@ class HardwareAnalysisTests(unittest.TestCase):
         self.assertIn('"detected": false', prompt)
         self.assertIn(
             "không được tuyên bố rằng có batch bất thường theo quy tắc IQR",
+            prompt,
+        )
+        self.assertIn(
+            'gọi đó là "tỷ lệ lỗi tổng thể"; không gọi là "tỷ lệ lỗi trung',
+            prompt,
+        )
+        self.assertIn(
+            "Defect_Type là trường tùy chọn đối với data_quality",
+            prompt,
+        )
+        self.assertIn(
+            "rà soát toàn bộ anomaly_analysis.findings",
+            prompt,
+        )
+        self.assertIn(
+            "Không bỏ qua phát hiện trọng yếu",
             prompt,
         )
 

@@ -1045,6 +1045,16 @@ button {
   margin: 16px 0 0;
 }
 
+.quality-optional-field-note {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border-left: 2px solid rgba(120, 170, 255, 0.45);
+  background: rgba(120, 170, 255, 0.06);
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 @media (max-width: 768px) {
   .data-quality-main {
     align-items: flex-start;
@@ -1168,6 +1178,75 @@ button {
 .ai-observation p {
   margin: 0;
   line-height: 1.65;
+}
+
+/* ========================================
+   ANOMALY HIGHLIGHTS
+======================================== */
+
+.anomaly-highlights-card {
+  overflow: hidden;
+}
+
+.anomaly-guidance {
+  max-width: 900px;
+  margin: -8px 0 20px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.anomaly-highlight-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.anomaly-highlight {
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.anomaly-highlight.anomaly-rule {
+  border-color: rgba(255, 190, 70, 0.2);
+  background: rgba(255, 190, 70, 0.045);
+}
+
+.anomaly-highlight-type {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.anomaly-highlight h4 {
+  margin: 8px 0 6px;
+  font-size: 14px;
+}
+
+.anomaly-highlight p,
+.anomaly-rule-notes p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.anomaly-rule-notes {
+  display: grid;
+  gap: 6px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 768px) {
+  .anomaly-highlight-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 

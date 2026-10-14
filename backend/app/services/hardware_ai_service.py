@@ -3,6 +3,7 @@
 
 import json
 import math
+import re
 from datetime import date, datetime
 from typing import Any, Literal
 
@@ -416,6 +417,19 @@ def normalize_summary_record_scope(
     return ". ".join(sentences).rstrip(". ") + "."
 
 
+def _normalize_aggregate_defect_rate_wording(text: str) -> str:
+    return re.sub(
+        "tỷ lệ lỗi trung bình",
+        lambda match: (
+            "Tỷ lệ lỗi tổng thể"
+            if match.group(0)[0].isupper()
+            else "tỷ lệ lỗi tổng thể"
+        ),
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
 def _format_summary_number(value: int | float) -> str:
     if isinstance(value, int):
         return f"{value:,}".replace(",", ".")
@@ -508,6 +522,9 @@ I. QUY TẮC VỀ SỐ LIỆU
    Mọi defect_rate đều là giá trị phần trăm. Khi nhắc đến trong văn bản,
    luôn thêm dấu "%" và dùng dấu phẩy thập phân theo tiếng Việt
    (ví dụ 2.05 trong dữ liệu phải viết là 2,05%).
+   Khi nhắc đến metrics.defect_rate được tính từ tổng số lỗi và tổng sản
+   lượng, gọi đó là "tỷ lệ lỗi tổng thể"; không gọi là "tỷ lệ lỗi trung
+   bình" vì đây là tỷ lệ gộp, không phải trung bình cộng các tỷ lệ nhóm.
 
 8. Mọi giá trị downtime trong dữ liệu được tính bằng phút. Giữ nguyên
    số liệu và đơn vị phút cho tổng, nhóm và ngày; không ghi thành giờ
@@ -563,6 +580,9 @@ III. QUY TẮC PHÂN TÍCH
 5. supplier_analysis:
    Nêu các khác biệt quan sát được giữa các nhà cung cấp.
    Không kết luận nhà cung cấp gây ra lỗi chỉ vì số lỗi hoặc downtime cao.
+   Thứ hạng defect_rate chỉ mô tả tập dữ liệu hiện tại. Nêu rõ số nhà cung
+   cấp và số ngày sản xuất khi có dữ liệu; không kết luận nhà cung cấp kém
+   chất lượng hoặc là nguyên nhân gây lỗi nếu chưa có bằng chứng độc lập.
 
 6. batch_analysis:
    Xác định batch có chỉ số đáng chú ý nếu dữ liệu hỗ trợ.
@@ -581,6 +601,13 @@ III. QUY TẮC PHÂN TÍCH
 9. recommended_actions:
    Mỗi hành động phải liên hệ rõ ràng với một quan sát hoặc rủi ro.
    Ưu tiên các hành động có thể kiểm tra và thực hiện được.
+   Trước khi chọn hành động, rà soát toàn bộ anomaly_analysis.findings
+   cùng các KPI và thứ hạng đáng chú ý trong context; không chỉ chọn
+   theo các highest_* có sẵn. Ưu tiên các bất thường có detected=true
+   và các phát hiện quan trọng về sản lượng, chất lượng hoặc downtime.
+   Có thể gộp các phát hiện liên quan vào một hành động, không bắt buộc
+   mỗi phát hiện có một hành động riêng. Không bỏ qua phát hiện trọng yếu
+   mà không nêu lý do ưu tiên trong reason của hành động liên quan.
    Không giả định nguyên nhân gốc rễ.
    Chỉ nêu nguyên nhân gốc rễ như sự thật khi context có bằng chứng
    trực tiếp xác nhận nguyên nhân đó; số lỗi, defect_rate hoặc thứ hạng
@@ -619,6 +646,9 @@ Phân biệt rõ:
 Các chỉ số trên có ý nghĩa khác nhau.
 Không cộng trừ chúng với nhau hoặc suy luận rằng chúng phải bằng nhau
 nếu chưa xem xét quy tắc xử lý dữ liệu của backend.
+invalid_metric_rows_excluded là số dòng duy nhất bị loại sau khi xét các
+điều kiện KPI; số dòng theo từng metric có thể chồng lấp và tuyệt đối
+không cộng các nhóm metric để suy ra tổng số dòng bị loại.
 
 data_quality được tính trên dữ liệu gốc và kiểm tra đầy đủ các trường
 bắt buộc. data_processing được tính sau khi bỏ dòng trùng và loại các
@@ -649,6 +679,9 @@ Trong defect_type_analysis, defects là tổng số lượng lỗi theo nhóm,
 "Không xác định" đại diện cho số lỗi có loại lỗi bị thiếu/trống; giá trị
 đó không phải số dòng thiếu dữ liệu, số dòng invalid hay số dòng bị loại
 khỏi KPI. Không suy luận các số lượng này bằng nhau.
+Defect_Type là trường tùy chọn đối với data_quality; bản ghi thiếu loại
+lỗi được gom vào nhóm "Không xác định" khi có phân tích loại lỗi, và
+không được tính là invalid chỉ vì trường này bị thiếu.
 
 VI. QUY TẮC TIẾNG VIỆT
 
@@ -959,8 +992,9 @@ def _normalize_quality_observations(
     if reasons:
         exclusion_observation = (
             f"Có {excluded_rows} dòng bị loại khỏi tính KPI; "
-            f"nguyên nhân theo metric: {', '.join(reasons)}. "
-            "Một dòng có thể xuất hiện ở nhiều nhóm nguyên nhân."
+            f"số dòng theo từng metric: {', '.join(reasons)}. "
+            "Các nhóm metric có thể chồng lấp; không cộng các số này "
+            "để tính tổng dòng bị loại."
         )
         if (
             exclusion_observation
@@ -969,6 +1003,147 @@ def _normalize_quality_observations(
             analysis.quality_analysis.key_observations.append(
                 exclusion_observation
             )
+
+    return analysis
+
+
+def _format_analysis_number(
+    value: int | float,
+    decimals: int | None = None,
+) -> str:
+    if decimals is not None:
+        return f"{value:.{decimals}f}".replace(".", ",")
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).replace(".", ",")
+
+
+def _is_finite_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
+def _normalize_group_analysis_observations(
+    analysis: DeepAIAnalysis,
+    report: dict,
+) -> DeepAIAnalysis:
+    def qualitative_only(observations: list[str]) -> list[str]:
+        return [
+            observation
+            for observation in observations
+            if not any(character.isdigit() for character in observation)
+        ]
+
+    component_observations = qualitative_only(
+        analysis.component_analysis.key_observations
+    )
+    component_rows = report.get("component_performance", [])
+    if isinstance(component_rows, list):
+        unknown_components = [
+            row
+            for row in component_rows
+            if isinstance(row, dict)
+            and isinstance(row.get("component"), str)
+            and row["component"].strip().casefold() == "không xác định"
+            and _is_finite_number(row.get("production"))
+        ]
+        for row in unknown_components:
+            production = _format_analysis_number(row["production"])
+            component_observations.append(
+                "Theo component_performance, nhóm linh kiện "
+                f'"Không xác định" có sản lượng {production} đơn vị.'
+            )
+
+    highest_component = report.get("highest_defect_component")
+    if isinstance(highest_component, dict):
+        component_name = highest_component.get("component")
+        defect_rate = highest_component.get("defect_rate")
+        if (
+            isinstance(component_name, str)
+            and component_name.strip()
+            and component_name.strip().casefold() != "không xác định"
+            and _is_finite_number(defect_rate)
+        ):
+            component_observations.append(
+                "Theo component_performance, linh kiện "
+                f'"{component_name.strip()}" có tỷ lệ lỗi cao nhất trong '
+                "các linh kiện được xác định, ở mức "
+                f"{_format_analysis_number(defect_rate, 2)}%. Đây là tỷ lệ "
+                "lỗi theo linh kiện, không phải số lỗi theo loại lỗi."
+            )
+    analysis.component_analysis.key_observations = component_observations
+
+    supplier_observations = qualitative_only(
+        analysis.supplier_analysis.key_observations
+    )
+    highest_supplier = report.get("highest_defect_supplier")
+    metrics = report.get("metrics", {})
+    if isinstance(highest_supplier, dict):
+        supplier_name = highest_supplier.get("supplier")
+        defect_rate = highest_supplier.get("defect_rate")
+        supplier_count = (
+            metrics.get("supplier_count")
+            if isinstance(metrics, dict)
+            else None
+        )
+        date_count = (
+            metrics.get("date_count")
+            if isinstance(metrics, dict)
+            else None
+        )
+        if (
+            isinstance(supplier_name, str)
+            and supplier_name.strip()
+            and _is_finite_number(defect_rate)
+        ):
+            scope = "trong tập dữ liệu hiện tại"
+            if (
+                _is_finite_number(supplier_count)
+                and _is_finite_number(date_count)
+            ):
+                scope += (
+                    f" gồm {_format_analysis_number(supplier_count)} nhà "
+                    f"cung cấp và {_format_analysis_number(date_count)} "
+                    "ngày sản xuất"
+                )
+            supplier_observations.append(
+                f"{supplier_name.strip()} có tỷ lệ lỗi cao nhất "
+                f"{scope}, ở mức "
+                f"{_format_analysis_number(defect_rate, 2)}%. "
+                "Đây chỉ là thứ hạng mô tả dữ liệu hiện có, chưa đủ bằng "
+                "chứng để kết luận nhà cung cấp kém chất lượng hoặc gây ra "
+                "lỗi."
+            )
+    analysis.supplier_analysis.key_observations = supplier_observations
+
+    quality_observations = qualitative_only(
+        analysis.quality_analysis.key_observations
+    )
+    defect_type_rows = report.get("defect_type_analysis", [])
+    if isinstance(defect_type_rows, list):
+        rows_with_defects = [
+            row
+            for row in defect_type_rows
+            if isinstance(row, dict)
+            and _is_finite_number(row.get("defects"))
+            and isinstance(row.get("defect_type"), str)
+        ]
+        if rows_with_defects:
+            highest_defect_type = max(
+                rows_with_defects,
+                key=lambda row: row["defects"],
+            )
+            quality_observations.append(
+                "Theo defect_type_analysis, loại lỗi "
+                f'"{highest_defect_type["defect_type"]}" có '
+                f'{_format_analysis_number(highest_defect_type["defects"])} '
+                "lỗi, nhiều nhất theo số lượng lỗi giữa các loại lỗi; "
+                "đây không phải tỷ lệ lỗi theo linh kiện."
+            )
+    analysis.quality_analysis.key_observations = quality_observations
 
     return analysis
 
@@ -1291,6 +1466,10 @@ def analyze_hardware_deep(
         analysis,
         report,
     )
+    analysis = _normalize_group_analysis_observations(
+        analysis,
+        context,
+    )
     analysis = _normalize_quality_observations(
         analysis,
         report,
@@ -1299,6 +1478,15 @@ def analyze_hardware_deep(
         analysis.executive_summary.summary,
         report,
     )
+    analysis.executive_summary.summary = (
+        _normalize_aggregate_defect_rate_wording(
+            analysis.executive_summary.summary
+        )
+    )
+    analysis.executive_summary.key_observations = [
+        _normalize_aggregate_defect_rate_wording(observation)
+        for observation in analysis.executive_summary.key_observations
+    ]
     analysis = _normalize_recommendation_priorities(
         analysis,
         report,
