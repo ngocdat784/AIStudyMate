@@ -1545,6 +1545,94 @@ def calculate_hardware_kpis(
     return kpis
 
 
+def compare_hardware_models(
+    dataframe: pd.DataFrame,
+    model_a: str,
+    model_b: str,
+) -> dict[str, Any]:
+    if not model_a.strip() or not model_b.strip():
+        raise ValueError("Vui lòng chọn đủ hai model để so sánh.")
+
+    if model_a == model_b:
+        raise ValueError("Hai model được chọn phải khác nhau.")
+
+    cleaned_dataframe = clean_dataframe(dataframe)
+    model_column = find_column(cleaned_dataframe, "model")
+    if model_column is None:
+        raise ValueError("Không tìm thấy cột model trong dữ liệu.")
+
+    model_values = cleaned_dataframe[model_column].astype("string")
+    model_reports: dict[str, dict[str, Any]] = {}
+
+    for label, model_name in (("model_a", model_a), ("model_b", model_b)):
+        model_dataframe = cleaned_dataframe.loc[
+            model_values.eq(model_name).fillna(False)
+        ].copy()
+        if model_dataframe.empty:
+            raise ValueError(
+                f"Không tìm thấy model '{model_name}' trong dữ liệu."
+            )
+
+        try:
+            kpis = calculate_hardware_kpis(model_dataframe)
+        except ValueError as error:
+            raise ValueError(
+                f"Model '{model_name}' không có đủ dữ liệu hợp lệ để tính KPI: "
+                f"{error}"
+            ) from error
+
+        production = kpis["total_production"]
+        defects = kpis["total_defects"]
+        model_reports[label] = {
+            "name": model_name,
+            "production": production,
+            "defects": defects,
+            "defect_rate": (
+                kpis["defect_rate"]
+                if production > 0
+                else None
+            ),
+            "downtime": kpis["total_downtime"],
+            "rows_used_for_kpi": kpis["data_processing"]["rows_used_for_kpi"],
+            "invalid_rows_excluded": (
+                kpis["data_processing"]["invalid_metric_rows_excluded"]
+            ),
+        }
+
+    metrics = ("production", "defects", "downtime")
+    differences: dict[str, float | None] = {
+        metric: round(
+            model_reports["model_b"][metric]
+            - model_reports["model_a"][metric],
+            2,
+        )
+        for metric in metrics
+    }
+    rate_a = model_reports["model_a"]["defect_rate"]
+    rate_b = model_reports["model_b"]["defect_rate"]
+    rate_is_available = rate_a is not None and rate_b is not None
+    differences["defect_rate_percentage_points"] = (
+        round(rate_b - rate_a, 2)
+        if rate_is_available
+        else None
+    )
+
+    higher_defect_rate_model = None
+    if rate_is_available and rate_a != rate_b:
+        higher_defect_rate_model = (
+            model_a if rate_a > rate_b else model_b
+        )
+
+    return {
+        "models": model_reports,
+        "differences": differences,
+        "rate_comparison_status": (
+            "available" if rate_is_available else "insufficient_production"
+        ),
+        "higher_defect_rate_model": higher_defect_rate_model,
+    }
+
+
 # =========================================================
 # AI Insights
 # =========================================================

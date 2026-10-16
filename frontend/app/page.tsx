@@ -212,6 +212,37 @@ type HardwareResult = {
   ai_analysis: AIAnalysis;
 };
 
+type ComparedModel = {
+  name: string;
+  production: number;
+  defects: number;
+  defect_rate: number | null;
+  downtime: number;
+  rows_used_for_kpi: number;
+  invalid_rows_excluded: number;
+};
+
+type HardwareComparison = {
+  models: {
+    model_a: ComparedModel;
+    model_b: ComparedModel;
+  };
+  differences: {
+    production: number;
+    defects: number;
+    defect_rate_percentage_points: number | null;
+    downtime: number;
+  };
+  rate_comparison_status: "available" | "insufficient_production";
+  higher_defect_rate_model: string | null;
+  ai_analysis: {
+    summary: string;
+    investigation_points: string[];
+  } | null;
+  ai_status: "available" | "unavailable";
+  ai_error?: string;
+};
+
 export default function Home() {
   const [selectedFile, setSelectedFile] =
     useState<File | null>(null);
@@ -223,6 +254,21 @@ export default function Home() {
     useState(false);
 
   const [error, setError] =
+    useState("");
+
+  const [selectedModelA, setSelectedModelA] =
+    useState("");
+
+  const [selectedModelB, setSelectedModelB] =
+    useState("");
+
+  const [comparison, setComparison] =
+    useState<HardwareComparison | null>(null);
+
+  const [comparisonLoading, setComparisonLoading] =
+    useState(false);
+
+  const [comparisonError, setComparisonError] =
     useState("");
 
   // --------------------------------
@@ -272,7 +318,12 @@ export default function Home() {
     }
 
     setSelectedFile(file);
+    setResult(null);
+    setComparison(null);
+    setSelectedModelA("");
+    setSelectedModelB("");
     setError("");
+    setComparisonError("");
   };
 
   // --------------------------------
@@ -335,6 +386,18 @@ export default function Home() {
         await response.json();
 
       setResult(data);
+      const availableModels = Array.from(
+        new Set(
+          data.model_performance
+            .map((item) => item.model)
+            .filter(
+              (model): model is string =>
+                Boolean(model && model !== "Không xác định")
+            )
+        )
+      );
+      setSelectedModelA(availableModels[0] || "");
+      setSelectedModelB(availableModels[1] || "");
 
       setTimeout(() => {
         document
@@ -361,6 +424,64 @@ export default function Home() {
     }
   };
 
+  const handleCompare = async () => {
+    if (!selectedFile) {
+      setComparisonError(
+        "Vui lòng chọn file dữ liệu để so sánh model."
+      );
+      return;
+    }
+
+    if (!selectedModelA || !selectedModelB) {
+      setComparisonError("Vui lòng chọn đủ hai model.");
+      return;
+    }
+
+    if (selectedModelA === selectedModelB) {
+      setComparisonError("Hai model được chọn phải khác nhau.");
+      return;
+    }
+
+    setComparisonLoading(true);
+    setComparisonError("");
+    setComparison(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      formData.append("model_a", selectedModelA);
+      formData.append("model_b", selectedModelB);
+
+      const response = await fetch(
+        "http://127.0.0.1:8000/api/hardware/compare",
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data.detail === "string"
+            ? data.detail
+            : "Không thể so sánh hai model."
+        );
+      }
+
+      setComparison(data as HardwareComparison);
+    } catch (error) {
+      console.error(error);
+      setComparisonError(
+        error instanceof Error
+          ? error.message
+          : "Đã xảy ra lỗi khi so sánh model."
+      );
+    } finally {
+      setComparisonLoading(false);
+    }
+  };
+
   // --------------------------------
   // Clear
   // --------------------------------
@@ -368,7 +489,11 @@ export default function Home() {
   const handleClear = () => {
     setSelectedFile(null);
     setResult(null);
+    setComparison(null);
+    setSelectedModelA("");
+    setSelectedModelB("");
     setError("");
+    setComparisonError("");
 
     const input =
       document.getElementById(
@@ -451,6 +576,72 @@ export default function Home() {
         )
       );
     }, [result]);
+
+  const comparisonModels = result
+    ? Array.from(
+        new Set(
+          result.model_performance
+            .map((item) => item.model)
+            .filter(
+              (model): model is string =>
+                Boolean(model && model !== "Không xác định")
+            )
+        )
+      )
+    : [];
+
+  const comparisonMetrics = comparison
+    ? [
+        {
+          key: "production",
+          label: "Production",
+          unit: "sản phẩm",
+          valueA: comparison.models.model_a.production,
+          valueB: comparison.models.model_b.production,
+          difference: comparison.differences.production,
+        },
+        {
+          key: "defects",
+          label: "Defects",
+          unit: "lỗi",
+          valueA: comparison.models.model_a.defects,
+          valueB: comparison.models.model_b.defects,
+          difference: comparison.differences.defects,
+        },
+        {
+          key: "defect_rate",
+          label: "Defect Rate",
+          unit: "%",
+          valueA: comparison.models.model_a.defect_rate,
+          valueB: comparison.models.model_b.defect_rate,
+          difference:
+            comparison.differences.defect_rate_percentage_points,
+        },
+        {
+          key: "downtime",
+          label: "Downtime",
+          unit: "phút",
+          valueA: comparison.models.model_a.downtime,
+          valueB: comparison.models.model_b.downtime,
+          difference: comparison.differences.downtime,
+        },
+      ]
+    : [];
+
+  const formatComparisonValue = (
+    value: number | null,
+    unit: string
+  ) => {
+    if (value === null) {
+      return "Không đủ dữ liệu";
+    }
+
+    const formatted = value.toLocaleString("vi-VN", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    });
+    return `${formatted} ${unit}`;
+  };
 
   return (
     <main className="dashboard-app">
@@ -560,6 +751,7 @@ export default function Home() {
                 type="button"
                 className="clear-button"
                 onClick={handleClear}
+                disabled={loading || comparisonLoading}
               >
                 Clear
               </button>
@@ -603,6 +795,7 @@ export default function Home() {
               onChange={
                 handleFileChange
               }
+              disabled={loading || comparisonLoading}
               hidden
             />
 
@@ -631,6 +824,7 @@ export default function Home() {
                   onClick={
                     handleClear
                   }
+                  disabled={loading || comparisonLoading}
                 >
                   Remove
                 </button>
@@ -671,7 +865,7 @@ export default function Home() {
               <button
                 type="submit"
                 className="analyze-button"
-                disabled={loading}
+                disabled={loading || comparisonLoading}
               >
 
                 {loading ? (
@@ -773,6 +967,220 @@ export default function Home() {
 
             </div>
 
+            <section className="dashboard-card model-comparison-card">
+              <div className="dashboard-card-header">
+                <div>
+                  <span>02</span>
+                  <h3>So sánh hai model</h3>
+                </div>
+                <p>Compare model KPIs</p>
+              </div>
+
+              {comparisonModels.length < 2 ? (
+                <p className="comparison-empty">
+                  {!comparisonModels.length
+                    ? "Không tìm thấy dữ liệu model hợp lệ trong dataset."
+                    : "Cần ít nhất hai model có dữ liệu hợp lệ để so sánh."}
+                </p>
+              ) : (
+                <>
+                  <div className="comparison-controls">
+                    <label>
+                      <span>Model A</span>
+                      <select
+                        value={selectedModelA}
+                        onChange={(event) =>
+                          setSelectedModelA(event.target.value)
+                        }
+                      >
+                        {comparisonModels.map((model) => (
+                          <option key={model} value={model}>
+                            {model}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <span className="comparison-versus">VS</span>
+
+                    <label>
+                      <span>Model B</span>
+                      <select
+                        value={selectedModelB}
+                        onChange={(event) =>
+                          setSelectedModelB(event.target.value)
+                        }
+                      >
+                        {comparisonModels.map((model) => (
+                          <option key={model} value={model}>
+                            {model}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <button
+                      type="button"
+                      className="comparison-button"
+                      onClick={handleCompare}
+                      disabled={
+                        comparisonLoading ||
+                        !selectedModelA ||
+                        !selectedModelB ||
+                        selectedModelA === selectedModelB
+                      }
+                    >
+                      {comparisonLoading
+                        ? "Đang so sánh..."
+                        : "So sánh model"}
+                    </button>
+                  </div>
+
+                  {selectedModelA === selectedModelB && (
+                    <p className="comparison-hint">
+                      Chọn hai model khác nhau để tiếp tục.
+                    </p>
+                  )}
+
+                  {comparisonError && (
+                    <div className="error-box comparison-error">
+                      <strong>Không thể so sánh</strong>
+                      <span>{comparisonError}</span>
+                    </div>
+                  )}
+
+                  {comparisonLoading && (
+                    <div
+                      className="comparison-loading"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <span className="spinner" />
+                      Đang tính KPI và tạo nhận xét AI...
+                    </div>
+                  )}
+
+                  {comparison && !comparisonLoading && (
+                    <>
+                      <div className="comparison-conclusion">
+                        <strong>
+                          {comparison.rate_comparison_status ===
+                          "insufficient_production"
+                            ? "Chưa thể so sánh tỷ lệ lỗi"
+                            : comparison.higher_defect_rate_model
+                              ? `${comparison.higher_defect_rate_model} có tỷ lệ lỗi cao hơn`
+                              : "Tỷ lệ lỗi của hai model bằng nhau"}
+                        </strong>
+                        <p>
+                          {comparison.differences
+                            .defect_rate_percentage_points === null
+                            ? "Production bằng 0 ở ít nhất một model nên không thể xác định tỷ lệ lỗi."
+                            : `Chênh lệch tỷ lệ lỗi: ${Math.abs(
+                                comparison.differences
+                                  .defect_rate_percentage_points
+                              ).toLocaleString("vi-VN", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })} điểm phần trăm (B − A).`}
+                        </p>
+                      </div>
+
+                      <div className="comparison-chart">
+                        {comparisonMetrics.map((metric) => {
+                          const values = [
+                            metric.valueA || 0,
+                            metric.valueB || 0,
+                          ];
+                          const maxValue = Math.max(...values, 1);
+
+                          return (
+                            <div
+                              className="comparison-chart-metric"
+                              key={metric.key}
+                            >
+                              <div className="comparison-chart-title">
+                                <strong>{metric.label}</strong>
+                                <span>
+                                  Δ{" "}
+                                  {formatComparisonValue(
+                                    metric.difference,
+                                    metric.key === "defect_rate"
+                                      ? "điểm %"
+                                      : metric.unit
+                                  )}
+                                </span>
+                              </div>
+                              {[0, 1].map((index) => {
+                                const model =
+                                  index === 0
+                                    ? comparison.models.model_a
+                                    : comparison.models.model_b;
+                                const value =
+                                  index === 0
+                                    ? metric.valueA
+                                    : metric.valueB;
+                                const numericValue = value || 0;
+
+                                return (
+                                  <div
+                                    className="comparison-bar-row"
+                                    key={model.name}
+                                  >
+                                    <span>{model.name}</span>
+                                    <div className="comparison-bar-track">
+                                      <div
+                                        className={
+                                          index === 0
+                                            ? "comparison-bar comparison-bar-a"
+                                            : "comparison-bar comparison-bar-b"
+                                        }
+                                        style={{
+                                          width: `${
+                                            (numericValue / maxValue) * 100
+                                          }%`,
+                                        }}
+                                      />
+                                    </div>
+                                    <strong>
+                                      {formatComparisonValue(
+                                        value,
+                                        metric.unit
+                                      )}
+                                    </strong>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {comparison.ai_analysis ? (
+                        <div className="comparison-ai">
+                          <span>AI INSIGHT</span>
+                          <p>{comparison.ai_analysis.summary}</p>
+                          <ul>
+                            {comparison.ai_analysis.investigation_points.map(
+                              (point, index) => (
+                                <li key={`${index}-${point}`}>{point}</li>
+                              )
+                            )}
+                          </ul>
+                        </div>
+                      ) : (
+                        <div className="comparison-ai comparison-ai-unavailable">
+                          <span>AI INSIGHT</span>
+                          <p>
+                            {comparison.ai_error ||
+                              "Nhận xét AI hiện không khả dụng."}
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </section>
 
 
             {/* -------------------------------- */}

@@ -115,6 +115,17 @@ class DeepAIAnalysis(StrictModel):
     )
 
 
+class HardwareComparisonAnalysis(StrictModel):
+    summary: str = Field(
+        description="Nhận xét định tính ngắn gọn bằng tiếng Việt."
+    )
+    investigation_points: list[str] = Field(
+        min_length=1,
+        max_length=5,
+        description="Các điểm cần kiểm tra tiếp theo dựa trên dữ liệu được cung cấp."
+    )
+
+
 def _gemini_response_schema(
     model: type[BaseModel],
 ) -> dict[str, Any]:
@@ -1504,3 +1515,47 @@ def analyze_hardware_deep(
     )
 
     return result
+
+
+def analyze_hardware_comparison(
+    comparison: dict[str, Any],
+) -> dict[str, Any]:
+    prompt = (
+        "Bạn là chuyên gia phân tích chất lượng sản xuất phần cứng. "
+        "Hãy nhận xét ngắn gọn bằng tiếng Việt và đề xuất các điểm cần "
+        "kiểm tra dựa duy nhất trên dữ liệu so sánh đã được Python tính "
+        "toán dưới đây. Các số liệu và chênh lệch là cố định; không tính "
+        "lại, không sửa, không thêm số liệu và không suy đoán nguyên nhân "
+        "chắc chắn. Nếu tỷ lệ lỗi không thể so sánh do production bằng 0, "
+        "hãy nêu rõ giới hạn đó và không kết luận model nào có tỷ lệ lỗi "
+        "cao hơn.\n\n"
+        f"{json.dumps(comparison, ensure_ascii=False)}"
+    )
+    response = call_gemini_with_retry(
+        lambda: get_client().models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json",
+                "response_schema": _gemini_response_schema(
+                    HardwareComparisonAnalysis
+                ),
+                "temperature": 0.2,
+            },
+        )
+    )
+
+    response_text = getattr(response, "text", None)
+    if not response_text or not response_text.strip():
+        raise ValueError("Gemini không trả về nhận xét so sánh model.")
+
+    try:
+        analysis = HardwareComparisonAnalysis.model_validate_json(
+            response_text
+        )
+    except Exception as exc:
+        raise ValueError(
+            "Không thể xác thực nhận xét so sánh model từ Gemini."
+        ) from exc
+
+    return analysis.model_dump()
