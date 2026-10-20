@@ -175,28 +175,78 @@ class HardwareTrendAnalysis(StrictModel):
     limitations: list[str] = Field(min_length=1, max_length=10)
 
 
+
 def _gemini_response_schema(
     model: type[BaseModel],
 ) -> dict[str, Any]:
-    def remove_unsupported_keywords(value: Any) -> Any:
-        if isinstance(value, dict):
-            return {
-                key: remove_unsupported_keywords(item)
-                for key, item in value.items()
-                if key
-                not in {
-                    "additionalProperties",
-                    "maxLength",
-                    "minLength",
-                }
-            }
-        if isinstance(value, list):
-            return [remove_unsupported_keywords(item) for item in value]
-        return value
+    raw_schema = model.model_json_schema()
+    definitions = raw_schema.get("$defs", {})
 
-    return remove_unsupported_keywords(
-        model.model_json_schema()
-    )
+    # Các thuộc tính không cần gửi cho Gemini.
+    unsupported_keywords = {
+        "$defs",
+        "$schema",
+        "$id",
+        "$ref",
+        "title",
+        "description",
+        "default",
+        "examples",
+        "additionalProperties",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+    }
+
+    def resolve_schema(value: Any) -> Any:
+        if isinstance(value, list):
+            return [resolve_schema(item) for item in value]
+
+        if not isinstance(value, dict):
+            return value
+
+        # Thay $ref bằng định nghĩa thực tế.
+        if "$ref" in value:
+            ref = value["$ref"]
+
+            if not ref.startswith("#/$defs/"):
+                raise ValueError(
+                    f"JSON Schema reference không được hỗ trợ: {ref}"
+                )
+
+            definition_name = ref.removeprefix("#/$defs/")
+
+            if definition_name not in definitions:
+                raise ValueError(
+                    f"Không tìm thấy schema definition: {definition_name}"
+                )
+
+            resolved = dict(definitions[definition_name])
+
+            # Giữ các thuộc tính bổ sung bên cạnh $ref, nếu có.
+            resolved.update({
+                key: item
+                for key, item in value.items()
+                if key != "$ref"
+            })
+
+            return resolve_schema(resolved)
+
+        return {
+            key: resolve_schema(item)
+            for key, item in value.items()
+            if key not in unsupported_keywords
+        }
+
+    schema = resolve_schema(raw_schema)
+
+    # Không gửi metadata ở cấp gốc.
+    schema.pop("title", None)
+    schema.pop("description", None)
+
+    return schema
+
 
 
 # ============================================================

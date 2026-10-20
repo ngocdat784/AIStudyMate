@@ -330,6 +330,23 @@ type TrendPeriodChange = {
   downtime_change_percent: number | null;
 };
 
+type TrendDimensionName = "Model" | "Supplier" | "Batch";
+
+type TrendDimensionGroup = {
+  name: string;
+  total_production: number;
+  time_series: TrendSeriesPoint[];
+  period_changes: TrendPeriodChange[];
+};
+
+type TrendDimensionResult = {
+  ranking_metric: "total_production_desc";
+  group_limit: number;
+  groups_returned: number;
+  groups_omitted: number;
+  groups: TrendDimensionGroup[];
+};
+
 type TrendAnomaly = {
   type: string;
   severity: string;
@@ -433,6 +450,7 @@ type HardwareTrendResult = {
   };
   time_series: TrendSeriesPoint[];
   period_changes: TrendPeriodChange[];
+  dimension_trends: Partial<Record<TrendDimensionName, TrendDimensionResult>>;
   anomalies: TrendAnomaly[];
   anomaly_thresholds: Record<string, number | string>;
   warnings: string[];
@@ -2590,6 +2608,17 @@ function HardwareTrendDashboard({
     ...series.map((point) => point.defect_rate ?? 0)
   );
   const ai = result.ai_analysis;
+  const dimensionLabels: Record<TrendDimensionName, string> = {
+    Model: "Model",
+    Supplier: "Nhà cung cấp",
+    Batch: "Batch",
+  };
+  const dimensionEntries = (
+    ["Model", "Supplier", "Batch"] as const
+  ).flatMap((dimension) => {
+    const trend = result.dimension_trends[dimension];
+    return trend ? [{ dimension, trend }] : [];
+  });
   const chartMetrics: {
     key: TrendMetric;
     label: string;
@@ -2906,10 +2935,103 @@ function HardwareTrendDashboard({
         )}
       </section>
 
-      <section className="dashboard-card trend-anomalies-card">
+      <section className="dashboard-card trend-dimensions-card">
         <div className="dashboard-card-header">
           <div>
             <span>05</span>
+            <h3>Xu hướng theo Model, nhà cung cấp và Batch</h3>
+          </div>
+          <p>
+            Hiển thị tối đa 10 nhóm mỗi chiều, xếp theo tổng sản lượng trong
+            khoảng đã chọn.
+          </p>
+        </div>
+        <p className="trend-dimension-disclaimer">
+          Đây là phân tích mô tả theo nhóm, không xác định nguyên nhân hay
+          chứng minh nhóm nào gây ra lỗi.
+        </p>
+        {dimensionEntries.length === 0 ? (
+          <div className="trend-empty-state">
+            Dataset không có các cột Model, Supplier hoặc Batch để phân tích.
+          </div>
+        ) : (
+          <div className="trend-dimension-list">
+            {dimensionEntries.map(({ dimension, trend }) => (
+                <section
+                  className="trend-dimension"
+                  key={dimension}
+                  aria-label={`Xu hướng theo ${dimensionLabels[dimension]}`}
+                >
+                  <div className="trend-dimension-heading">
+                    <h4>{dimensionLabels[dimension]}</h4>
+                    <span>
+                      {trend.groups_returned} / {trend.group_limit} nhóm
+                    </span>
+                  </div>
+                  {trend.groups_omitted > 0 && (
+                    <p className="trend-dimension-omitted">
+                      Đã lược {trend.groups_omitted.toLocaleString("vi-VN")}{" "}
+                      nhóm có tổng sản lượng thấp hơn khỏi bảng này.
+                    </p>
+                  )}
+                  {trend.groups.length === 0 ? (
+                    <div className="trend-empty-state">
+                      Không có nhóm hợp lệ trong khoảng thời gian đã chọn.
+                    </div>
+                  ) : (
+                    <div className="trend-series-table-wrapper">
+                      <table className="machine-table trend-series-table">
+                        <thead>
+                          <tr>
+                            <th>{dimensionLabels[dimension]}</th>
+                            <th>Kỳ</th>
+                            <th>Sản lượng</th>
+                            <th>Số lỗi</th>
+                            <th>Tỷ lệ lỗi</th>
+                            <th>Downtime</th>
+                            <th>Dòng dùng / tổng</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {trend.groups.flatMap((group) =>
+                            group.time_series.map((point) => (
+                              <tr
+                                key={`${dimension}-${group.name}-${point.period_start}`}
+                              >
+                                <td>
+                                  <strong>{group.name}</strong>
+                                  <small className="trend-dimension-total">
+                                    Tổng sản lượng nhóm:{" "}
+                                    {formatTrendValue(group.total_production)}
+                                  </small>
+                                </td>
+                                <td>{formatPeriod(point.period_start)}</td>
+                                <td>{formatTrendValue(point.production)}</td>
+                                <td>{formatTrendValue(point.defects)}</td>
+                                <td>
+                                  {formatTrendValue(point.defect_rate, "%")}
+                                </td>
+                                <td>{formatTrendValue(point.downtime)}</td>
+                                <td>
+                                  {point.rows_used} / {point.rows_in_period}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="dashboard-card trend-anomalies-card">
+        <div className="dashboard-card-header">
+          <div>
+            <span>06</span>
             <h3>Cảnh báo biến động</h3>
           </div>
           <p>
@@ -2984,7 +3106,7 @@ function HardwareTrendDashboard({
       >
         <div className="dashboard-card-header">
           <div>
-            <span>06</span>
+            <span>07</span>
             <h3>AI giải thích xu hướng</h3>
           </div>
           <p>

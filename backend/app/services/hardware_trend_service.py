@@ -15,6 +15,8 @@ PRODUCTION_DROP_THRESHOLD_PERCENT = 20.0
 DEFECT_INCREASE_THRESHOLD_PERCENT = 20.0
 DOWNTIME_INCREASE_THRESHOLD_PERCENT = 20.0
 DEFECT_RATE_INCREASE_THRESHOLD_POINTS = 0.5
+MAX_DIMENSION_TREND_GROUPS = 10
+TREND_DIMENSIONS = ("Model", "Supplier", "Batch")
 
 
 def _parse_record_date(value: Any) -> date | None:
@@ -321,6 +323,14 @@ def analyze_hardware_trends(
         raise ValueError("start_date phải nhỏ hơn hoặc bằng end_date.")
 
     grouped_rows: dict[date, list[dict[str, Any]]] = {}
+    dimension_rows: dict[
+        str,
+        dict[str, dict[date, list[dict[str, Any]]]],
+    ] = {
+        dimension: {}
+        for dimension in TREND_DIMENSIONS
+        if dimension in dataframe.columns
+    }
     invalid_date_rows = 0
     missing_date_rows = 0
     rows_outside_range = 0
@@ -373,16 +383,27 @@ def analyze_hardware_trends(
                 missing_numeric_by_metric[metric] += 1
 
         period = _period_start(parsed_date, granularity)
-        grouped_rows.setdefault(period, []).append(
-            {
-                "production": production,
-                "production_issue": production_issue,
-                "defects": defects,
-                "defects_issue": defects_issue,
-                "downtime": downtime,
-                "downtime_issue": downtime_issue,
-            }
-        )
+        row_metrics = {
+            "production": production,
+            "production_issue": production_issue,
+            "defects": defects,
+            "defects_issue": defects_issue,
+            "downtime": downtime,
+            "downtime_issue": downtime_issue,
+        }
+        grouped_rows.setdefault(period, []).append(row_metrics)
+        for dimension, groups in dimension_rows.items():
+            raw_group = record.get(dimension)
+            group_name = (
+                "Không xác định"
+                if _is_missing_value(raw_group)
+                or not str(raw_group).strip()
+                else str(raw_group).strip()
+            )
+            groups.setdefault(group_name, {}).setdefault(
+                period,
+                [],
+            ).append(row_metrics)
 
     time_series = [
         _aggregate_period(period, grouped_rows[period], granularity)
@@ -390,6 +411,50 @@ def analyze_hardware_trends(
     ]
     period_changes = _build_period_changes(time_series, granularity)
     anomalies = _build_anomalies(period_changes)
+    dimension_trends: dict[str, dict[str, Any]] = {}
+    for dimension, groups in dimension_rows.items():
+        ranked_groups = []
+        for name, grouped_periods in groups.items():
+            group_series = [
+                _aggregate_period(
+                    period,
+                    grouped_periods[period],
+                    granularity,
+                )
+                for period in sorted(grouped_periods)
+            ]
+            total_group_production = sum(
+                point["production"] for point in group_series
+            )
+            ranked_groups.append(
+                (
+                    name,
+                    total_group_production,
+                    group_series,
+                )
+            )
+        ranked_groups.sort(
+            key=lambda item: (-item[1], item[0].casefold())
+        )
+        selected_groups = ranked_groups[:MAX_DIMENSION_TREND_GROUPS]
+        dimension_trends[dimension] = {
+            "ranking_metric": "total_production_desc",
+            "group_limit": MAX_DIMENSION_TREND_GROUPS,
+            "groups_returned": len(selected_groups),
+            "groups_omitted": max(0, len(ranked_groups) - len(selected_groups)),
+            "groups": [
+                {
+                    "name": name,
+                    "total_production": round(total_production, 2),
+                    "time_series": group_series,
+                    "period_changes": _build_period_changes(
+                        group_series,
+                        granularity,
+                    ),
+                }
+                for name, total_production, group_series in selected_groups
+            ],
+        }
 
     valid_production = [
         row for rows in grouped_rows.values() for row in rows
@@ -522,6 +587,7 @@ def analyze_hardware_trends(
         },
         "time_series": time_series,
         "period_changes": period_changes,
+        "dimension_trends": dimension_trends,
         "anomalies": anomalies,
         "anomaly_thresholds": {
             "production_drop_percent": PRODUCTION_DROP_THRESHOLD_PERCENT,

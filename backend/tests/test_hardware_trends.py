@@ -114,6 +114,116 @@ class HardwareTrendServiceTests(unittest.TestCase):
         self.assertEqual(result["summary"]["rows_outside_requested_range"], 2)
         self.assertEqual(result["summary"]["totals"]["production"], 5)
 
+    def test_dimension_trends_group_model_supplier_and_batch_by_period(self):
+        dataframe = pd.DataFrame(
+            {
+                "Date": [
+                    "2026-10-01",
+                    "2026-10-01",
+                    "2026-10-02",
+                    "2026-10-01",
+                    "2026-10-02",
+                ],
+                "Model": [
+                    "Model A",
+                    "Model A",
+                    "Model A",
+                    "Model B",
+                    "Model B",
+                ],
+                "Supplier": [
+                    "Supplier X",
+                    "Supplier X",
+                    "Supplier X",
+                    "Supplier Y",
+                    "Supplier Y",
+                ],
+                "Batch": ["Batch 1", "Batch 1", "Batch 1", "Batch 2", "Batch 2"],
+                "Production": [100, 300, 80, 50, 70],
+                "Defects": [2, 30, 4, 5, 7],
+                "Downtime": [3, 9, 4, 5, 6],
+            }
+        )
+
+        result = analyze_hardware_trends(dataframe, "day")
+        model_groups = result["dimension_trends"]["Model"]["groups"]
+
+        self.assertEqual(
+            set(result["dimension_trends"]),
+            {"Model", "Supplier", "Batch"},
+        )
+        self.assertEqual(
+            result["dimension_trends"]["Model"]["ranking_metric"],
+            "total_production_desc",
+        )
+        self.assertEqual(model_groups[0]["name"], "Model A")
+        self.assertEqual(model_groups[0]["total_production"], 480)
+        self.assertEqual(
+            [point["period_start"] for point in model_groups[0]["time_series"]],
+            ["2026-10-01", "2026-10-02"],
+        )
+        self.assertEqual(
+            model_groups[0]["time_series"][0]["defect_rate"],
+            8.0,
+        )
+        self.assertEqual(
+            model_groups[0]["period_changes"][0][
+                "defect_rate_delta_percentage_points"
+            ],
+            -3.0,
+        )
+
+    def test_dimension_trends_limit_groups_and_report_omitted_count(self):
+        dataframe = pd.DataFrame(
+            {
+                "Date": ["2026-10-01"] * 12,
+                "Model": [f"Model {index:02d}" for index in range(12)],
+                "Production": list(range(1, 13)),
+                "Defects": [0] * 12,
+            }
+        )
+
+        result = analyze_hardware_trends(dataframe, "day")
+        model_trends = result["dimension_trends"]["Model"]
+
+        self.assertEqual(model_trends["group_limit"], 10)
+        self.assertEqual(model_trends["groups_returned"], 10)
+        self.assertEqual(model_trends["groups_omitted"], 2)
+        self.assertEqual(
+            model_trends["groups"][0]["name"],
+            "Model 11",
+        )
+        self.assertEqual(result["summary"]["totals"]["production"], 78)
+        self.assertNotIn("Supplier", result["dimension_trends"])
+
+    def test_dimension_trends_respect_range_and_metric_validation(self):
+        dataframe = pd.DataFrame(
+            {
+                "Date": ["2026-10-01", "2026-10-02", "2026-11-01"],
+                "Model": ["Model A", "Model A", "Model B"],
+                "Supplier": ["Supplier X", "Supplier X", "Supplier Y"],
+                "Batch": ["Batch 1", "Batch 1", "Batch 2"],
+                "Production": [100, -10, 900],
+                "Defects": [2, 1, 9],
+                "Downtime": [3, 4, 9],
+            }
+        )
+
+        result = analyze_hardware_trends(
+            dataframe,
+            "day",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 2),
+        )
+        model_group = result["dimension_trends"]["Model"]["groups"][0]
+
+        self.assertEqual(result["summary"]["rows_outside_requested_range"], 1)
+        self.assertEqual(model_group["name"], "Model A")
+        self.assertEqual(model_group["total_production"], 100)
+        self.assertEqual(model_group["time_series"][1]["rows_in_period"], 1)
+        self.assertEqual(model_group["time_series"][1]["rows_used"], 0)
+        self.assertIsNone(model_group["time_series"][1]["defect_rate"])
+
     def test_invalid_dates_and_metric_values_are_reported_not_coerced(self):
         dataframe = pd.DataFrame(
             {

@@ -2283,9 +2283,59 @@ button {
 
 .trend-chart-card,
 .trend-changes-card,
+.trend-dimensions-card,
 .trend-anomalies-card,
 .trend-ai-card {
   margin-top: 14px;
+}
+
+.trend-dimension-disclaimer {
+  margin: 0 0 14px;
+  color: #777;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.trend-dimension-list {
+  display: grid;
+  gap: 14px;
+}
+
+.trend-dimension {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid #e5e4df;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.trend-dimension-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trend-dimension-heading h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.trend-dimension-heading span {
+  color: #777;
+  font-size: 10px;
+}
+
+.trend-dimension-omitted {
+  margin: 8px 0 0;
+  color: #8a6420;
+  font-size: 10px;
+}
+
+.trend-dimension-total {
+  display: block;
+  margin-top: 4px;
+  color: #777;
+  font-size: 10px;
 }
 
 .trend-chart-grid {
