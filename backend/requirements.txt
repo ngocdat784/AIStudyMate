@@ -10,3 +10,4 @@ pypdf
 python-docx
 pandas
 openpyxl
+reportlab>=4.2,<5

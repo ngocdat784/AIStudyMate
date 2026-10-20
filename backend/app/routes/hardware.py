@@ -3,10 +3,19 @@ import io
 import logging
 import math
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    Body,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from app.services.hardware_ai_service import (
@@ -16,6 +25,10 @@ from app.services.hardware_ai_service import (
 from app.services.hardware_service import (
     analyze_hardware_dataframe,
     compare_hardware_models,
+)
+from app.services.hardware_report_service import (
+    build_hardware_pdf,
+    build_hardware_xlsx,
 )
 from app.services.multi_file_service import (
     DATASET_CACHE_TTL_SECONDS,
@@ -316,6 +329,69 @@ async def compare_hardware(
             status_code=500,
             detail=str(error),
         ) from error
+
+
+@router.post("/export")
+def export_hardware_report(
+    payload: dict[str, Any] = Body(...),
+    file_format: Literal["pdf", "xlsx"] = Query(
+        default="pdf",
+        alias="format",
+    ),
+):
+    if not payload:
+        raise HTTPException(
+            status_code=422,
+            detail="Không có dữ liệu phân tích để xuất báo cáo.",
+        )
+    if not any(
+        key in payload
+        for key in (
+            "title",
+            "summary",
+            "kpis",
+            "daily_production",
+            "ai_analysis",
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Payload không có cấu trúc kết quả phân tích HardwareAI.",
+        )
+
+    if file_format == "pdf":
+        try:
+            content = build_hardware_pdf(payload)
+        except Exception as error:
+            logger.exception("HardwareAI PDF report generation failed")
+            raise HTTPException(
+                status_code=500,
+                detail="Không thể tạo báo cáo PDF.",
+            ) from error
+        media_type = "application/pdf"
+        filename = "HardwareAI_Report.pdf"
+    else:
+        try:
+            content = build_hardware_xlsx(payload)
+        except Exception as error:
+            logger.exception("HardwareAI Excel report generation failed")
+            raise HTTPException(
+                status_code=500,
+                detail="Không thể tạo báo cáo Excel.",
+            ) from error
+        media_type = (
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        )
+        filename = "HardwareAI_Report.xlsx"
+
+    return StreamingResponse(
+        iter([content]),
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
 
 
 @router.post("/analyze-multiple")

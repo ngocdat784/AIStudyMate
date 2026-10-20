@@ -176,13 +176,15 @@ class HardwareTrendAnalysis(StrictModel):
 
 
 
+
 def _gemini_response_schema(
     model: type[BaseModel],
 ) -> dict[str, Any]:
     raw_schema = model.model_json_schema()
     definitions = raw_schema.get("$defs", {})
 
-    # Các thuộc tính không cần gửi cho Gemini.
+    # Các keyword metadata hoặc ràng buộc không gửi cho Gemini.
+    # Lưu ý: tên field bên trong "properties" phải được giữ nguyên.
     unsupported_keywords = {
         "$defs",
         "$schema",
@@ -201,7 +203,10 @@ def _gemini_response_schema(
 
     def resolve_schema(value: Any) -> Any:
         if isinstance(value, list):
-            return [resolve_schema(item) for item in value]
+            return [
+                resolve_schema(item)
+                for item in value
+            ]
 
         if not isinstance(value, dict):
             return value
@@ -233,11 +238,26 @@ def _gemini_response_schema(
 
             return resolve_schema(resolved)
 
-        return {
-            key: resolve_schema(item)
-            for key, item in value.items()
-            if key not in unsupported_keywords
-        }
+        result = {}
+
+        for key, item in value.items():
+            # Xử lý riêng properties để không xóa tên field
+            # chỉ vì tên field trùng với keyword của JSON Schema.
+            if key == "properties" and isinstance(item, dict):
+                result[key] = {
+                    property_name: resolve_schema(property_schema)
+                    for property_name, property_schema in item.items()
+                }
+                continue
+
+            # Loại bỏ metadata/ràng buộc không hỗ trợ.
+            # Áp dụng ở schema object, không áp dụng lên tên field.
+            if key in unsupported_keywords:
+                continue
+
+            result[key] = resolve_schema(item)
+
+        return result
 
     schema = resolve_schema(raw_schema)
 
@@ -246,6 +266,7 @@ def _gemini_response_schema(
     schema.pop("description", None)
 
     return schema
+
 
 
 

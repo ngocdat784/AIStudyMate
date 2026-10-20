@@ -472,6 +472,12 @@ export default function Home() {
   const [error, setError] =
     useState("");
 
+  const [exportingFormat, setExportingFormat] =
+    useState<"pdf" | "xlsx" | null>(null);
+
+  const [exportError, setExportError] =
+    useState("");
+
   const [selectedModelA, setSelectedModelA] =
     useState("");
 
@@ -565,6 +571,7 @@ export default function Home() {
 
     setSelectedFile(file);
     setResult(null);
+    setExportError("");
     setComparison(null);
     setSelectedModelA("");
     setSelectedModelB("");
@@ -765,6 +772,7 @@ export default function Home() {
     setLoading(true);
     setError("");
     setResult(null);
+    setExportError("");
 
     try {
       const formData =
@@ -902,6 +910,75 @@ export default function Home() {
     }
   };
 
+  const handleExportReport = async (
+    format: "pdf" | "xlsx"
+  ) => {
+    if (!result || exportingFormat !== null) {
+      return;
+    }
+
+    setExportingFormat(format);
+    setExportError("");
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/hardware/export?format=${format}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(result),
+        }
+      );
+
+      if (!response.ok) {
+        let message = "Không thể xuất báo cáo HardwareAI.";
+        const responseText = await response.text();
+
+        if (responseText) {
+          try {
+            const data: unknown = JSON.parse(responseText);
+            if (
+              typeof data === "object" &&
+              data !== null &&
+              "detail" in data &&
+              typeof data.detail === "string"
+            ) {
+              message = data.detail;
+            }
+          } catch {
+            message = responseText;
+          }
+        }
+
+        throw new Error(message);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download =
+        format === "pdf"
+          ? "HardwareAI_Report.pdf"
+          : "HardwareAI_Report.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error) {
+      console.error("HardwareAI report export failed:", error);
+      setExportError(
+        error instanceof Error
+          ? error.message
+          : "Đã xảy ra lỗi khi xuất báo cáo."
+      );
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
   // --------------------------------
   // Clear
   // --------------------------------
@@ -909,6 +986,7 @@ export default function Home() {
   const handleClear = () => {
     setSelectedFile(null);
     setResult(null);
+    setExportError("");
     setComparison(null);
     setSelectedModelA("");
     setSelectedModelB("");
@@ -1776,6 +1854,44 @@ export default function Home() {
               </div>
 
             </div>
+
+            <section className="export-report-card">
+              <div className="export-report-info">
+                <h3>Export Report</h3>
+                <p>
+                  Xuất báo cáo từ kết quả phân tích hiện tại, không chạy lại
+                  phân tích hoặc AI.
+                </p>
+              </div>
+              <div className="export-report-actions">
+                <button
+                  type="button"
+                  className="export-report-button"
+                  onClick={() => handleExportReport("pdf")}
+                  disabled={exportingFormat !== null}
+                >
+                  {exportingFormat === "pdf"
+                    ? "Đang tạo PDF..."
+                    : "Export PDF"}
+                </button>
+                <button
+                  type="button"
+                  className="export-report-button"
+                  onClick={() => handleExportReport("xlsx")}
+                  disabled={exportingFormat !== null}
+                >
+                  {exportingFormat === "xlsx"
+                    ? "Đang tạo Excel..."
+                    : "Export Excel"}
+                </button>
+              </div>
+              {exportError && (
+                <div className="error-box" role="alert">
+                  <strong>Lỗi xuất báo cáo</strong>
+                  <span>{exportError}</span>
+                </div>
+              )}
+            </section>
 
             <section className="dashboard-card model-comparison-card">
               <div className="dashboard-card-header">
