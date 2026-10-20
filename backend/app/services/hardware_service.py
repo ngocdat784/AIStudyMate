@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
 from app.services.data_quality_service import (
+    _to_numeric,
     calculate_data_quality,
 )
 from app.services.anomaly_detection_service import (
@@ -1033,28 +1034,13 @@ def calculate_hardware_kpis(
     # Parse numeric fields and filter invalid KPI records
     # =====================================================
 
-    def parse_numeric_for_validation(
-        series: pd.Series,
-    ) -> pd.Series:
-        values = (
-            series.astype("string")
-            .str.strip()
-            .str.replace(",", "", regex=False)
-            .str.replace("%", "", regex=False)
-        )
-
-        return pd.to_numeric(
-            values,
-            errors="coerce",
-        )
-
     # Production is required for production KPIs.
-    production_raw = parse_numeric_for_validation(
+    production_raw = _to_numeric(
         dataframe[production_column]
     )
 
     if defect_column:
-        defects_raw = parse_numeric_for_validation(
+        defects_raw = _to_numeric(
             dataframe[defect_column]
         )
     else:
@@ -1064,7 +1050,7 @@ def calculate_hardware_kpis(
         )
 
     if downtime_column:
-        downtime_raw = parse_numeric_for_validation(
+        downtime_raw = _to_numeric(
             dataframe[downtime_column]
         )
     else:

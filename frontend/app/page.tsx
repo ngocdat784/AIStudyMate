@@ -243,6 +243,204 @@ type HardwareComparison = {
   ai_error?: string;
 };
 
+type MultiFileReport = {
+  filename: string;
+  status: string;
+  rows_read: number;
+  rows_merged?: number;
+  rows_skipped?: number;
+  rows_with_warnings?: number;
+  rows_valid_for_kpi?: Record<"production" | "defects" | "defect_rate" | "downtime", number>;
+  rows_excluded_from_analysis?: Record<
+    "production" | "defects" | "defect_rate" | "downtime" | "time_series",
+    number
+  >;
+  invalid_dates: number;
+  invalid_numeric_values: number;
+  negative_values: number;
+  missing_required_columns: string[];
+  warnings?: string[];
+  error?: string;
+};
+
+type MultiFileResult = {
+  status: string;
+  files_processed: number;
+  files_valid: number;
+  files_with_warnings: number;
+  files_failed: number;
+  files_merged: number;
+  files_skipped: number;
+  total_rows_before_merge: number;
+  total_rows_after_merge: number;
+  rows_merged: number;
+  rows_skipped: number;
+  rows_with_warnings: number;
+  rows_valid_for_kpi: Record<
+    "production" | "defects" | "defect_rate" | "downtime",
+    number
+  >;
+  rows_excluded_from_analysis: Record<
+    "production" | "defects" | "defect_rate" | "downtime" | "time_series",
+    number
+  >;
+  duplicate_rows_detected: number;
+  dataset_id: string | null;
+  dataset_cache_ttl_seconds: number | null;
+  file_reports: MultiFileReport[];
+};
+
+type TrendMetric =
+  | "production"
+  | "defects"
+  | "defect_rate"
+  | "downtime";
+
+type TrendDirection =
+  | "increasing"
+  | "decreasing"
+  | "unchanged"
+  | "fluctuating"
+  | "insufficient_data";
+
+type TrendSeriesPoint = {
+  period_start: string;
+  period_end: string;
+  production: number;
+  defects: number;
+  defect_rate: number | null;
+  downtime: number;
+  rows_in_period: number;
+  rows_used: number;
+  rows_excluded: number;
+  records_used: Record<TrendMetric, number>;
+  records_excluded: Record<TrendMetric, number>;
+};
+
+type TrendPeriodChange = {
+  previous_period_start: string;
+  period_start: string;
+  missing_periods_between: number;
+  production_delta: number;
+  production_change_percent: number | null;
+  defects_delta: number;
+  defects_change_percent: number | null;
+  defect_rate_delta_percentage_points: number | null;
+  downtime_delta: number;
+  downtime_change_percent: number | null;
+};
+
+type TrendAnomaly = {
+  type: string;
+  severity: string;
+  previous_period_start: string;
+  period_start: string;
+  message: string;
+  observed_change_percent?: number;
+  observed_change_percentage_points?: number;
+};
+
+type TrendEvidence = {
+  evidence_kind?: string;
+  type: string;
+  metric?: string;
+  period_start?: string;
+  period_end?: string;
+  direction?: TrendDirection;
+  first_period_value?: number | null;
+  last_period_value?: number | null;
+  absolute_change?: number | null;
+  change_percent?: number | null;
+  change_percentage_points?: number | null;
+  previous_period_start?: string;
+  production_delta?: number;
+  production_change_percent?: number | null;
+  defects_delta?: number;
+  defects_change_percent?: number | null;
+  defect_rate_delta_percentage_points?: number | null;
+  downtime_delta?: number;
+  downtime_change_percent?: number | null;
+  observed_change_percent?: number;
+  observed_change_percentage_points?: number;
+  message?: string;
+};
+
+type TrendAIAnalysis = {
+  title: string;
+  summary: string;
+  summary_evidence_ids: string[];
+  trend_interpretation: {
+    metric: TrendMetric;
+    direction: TrendDirection;
+    observation: string;
+    evidence_ids: string[];
+  }[];
+  risk_areas: {
+    area: string;
+    priority: "low" | "medium" | "high" | "critical";
+    reason: string;
+    evidence_ids: string[];
+  }[];
+  recommended_actions: {
+    action: string;
+    purpose: string;
+    priority: "low" | "medium" | "high" | "critical";
+    evidence_ids: string[];
+  }[];
+  limitations: string[];
+  evidence: Record<string, TrendEvidence>;
+};
+
+type HardwareTrendResult = {
+  status: string;
+  granularity: "day" | "week" | "month";
+  week_definition: string | null;
+  requested_range: {
+    start_date: string | null;
+    end_date: string | null;
+  };
+  summary: {
+    periods_count: number;
+    first_period_start: string | null;
+    last_period_start: string | null;
+    rows_in_range: number;
+    rows_used: number;
+    rows_excluded: number;
+    rows_outside_requested_range: number;
+    invalid_date_rows: number;
+    missing_date_rows: number;
+    records_used: Record<TrendMetric, number>;
+    records_excluded: Record<TrendMetric, number>;
+    invalid_numeric_values: Record<string, number>;
+    missing_numeric_values: Record<string, number>;
+    totals: {
+      production: number;
+      defects: number;
+      defect_rate: number | null;
+      downtime: number;
+    };
+    overall_trends: Record<
+      TrendMetric,
+      {
+        direction: TrendDirection;
+        first_period_value: number | null;
+        last_period_value: number | null;
+        absolute_change: number | null;
+        change_percent: number | null;
+        change_percentage_points: number | null;
+      }
+    >;
+  };
+  time_series: TrendSeriesPoint[];
+  period_changes: TrendPeriodChange[];
+  anomalies: TrendAnomaly[];
+  anomaly_thresholds: Record<string, number | string>;
+  warnings: string[];
+  ai_analysis: TrendAIAnalysis | null;
+  ai_status: "available" | "unavailable";
+  ai_error?: string;
+};
+
 export default function Home() {
   const [selectedFile, setSelectedFile] =
     useState<File | null>(null);
@@ -270,6 +468,36 @@ export default function Home() {
 
   const [comparisonError, setComparisonError] =
     useState("");
+
+  const [multipleFiles, setMultipleFiles] =
+    useState<File[]>([]);
+
+  const [multipleLoading, setMultipleLoading] =
+    useState(false);
+
+  const [multipleError, setMultipleError] =
+    useState("");
+
+  const [multipleResult, setMultipleResult] =
+    useState<MultiFileResult | null>(null);
+
+  const [trendGranularity, setTrendGranularity] =
+    useState<"day" | "week" | "month">("day");
+
+  const [trendStartDate, setTrendStartDate] =
+    useState("");
+
+  const [trendEndDate, setTrendEndDate] =
+    useState("");
+
+  const [trendLoading, setTrendLoading] =
+    useState(false);
+
+  const [trendError, setTrendError] =
+    useState("");
+
+  const [trendResult, setTrendResult] =
+    useState<HardwareTrendResult | null>(null);
 
   // --------------------------------
   // File
@@ -324,6 +552,180 @@ export default function Home() {
     setSelectedModelB("");
     setError("");
     setComparisonError("");
+  };
+
+  const handleMultipleFilesChange = (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const files = Array.from(event.target.files ?? []);
+    const unsupportedFile = files.find((file) => {
+      const extension = "." + file.name.split(".").pop()?.toLowerCase();
+      return ![".csv", ".xlsx"].includes(extension);
+    });
+
+    if (unsupportedFile) {
+      setMultipleError(
+        `${unsupportedFile.name}: chỉ hỗ trợ file CSV hoặc XLSX.`
+      );
+      event.target.value = "";
+      return;
+    }
+
+    const oversizedFile = files.find(
+      (file) => file.size > 10 * 1024 * 1024
+    );
+    if (oversizedFile) {
+      setMultipleError(
+        `${oversizedFile.name}: file không được vượt quá 10MB.`
+      );
+      event.target.value = "";
+      return;
+    }
+
+    setMultipleFiles(files);
+    setMultipleResult(null);
+    setTrendResult(null);
+    setTrendError("");
+    setMultipleError(
+      files.length > 10
+        ? "Chỉ hỗ trợ tối đa 10 file mỗi lần."
+        : files.length === 1
+          ? "Cần chọn ít nhất hai file để gộp dữ liệu."
+          : ""
+    );
+  };
+
+  const handleAnalyzeMultiple = async () => {
+    if (multipleFiles.length < 2 || multipleFiles.length > 10) {
+      setMultipleError(
+        "Vui lòng chọn từ 2 đến 10 file CSV hoặc XLSX."
+      );
+      return;
+    }
+
+    setMultipleLoading(true);
+    setMultipleError("");
+    setTrendError("");
+    setMultipleResult(null);
+    setTrendResult(null);
+
+    try {
+      const formData = new FormData();
+      multipleFiles.forEach((file) => {
+        formData.append("files", file);
+      });
+
+      const response = await fetch(
+        "http://127.0.0.1:8000/api/hardware/analyze-multiple",
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data.detail === "string"
+            ? data.detail
+            : "Không thể chuẩn hóa và gộp các file."
+        );
+      }
+
+      setMultipleResult(data as MultiFileResult);
+      window.setTimeout(() => {
+        document.getElementById("multi-file-dashboard")?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 100);
+    } catch (error) {
+      console.error(error);
+      setMultipleError(
+        error instanceof Error
+          ? error.message
+          : "Đã xảy ra lỗi khi xử lý nhiều file."
+      );
+    } finally {
+      setMultipleLoading(false);
+    }
+  };
+
+  const handleAnalyzeTrends = async () => {
+    if (!multipleResult?.dataset_id) {
+      setTrendError(
+        "Không có dataset hợp lệ để phân tích. Hãy tải lên và gộp lại các file."
+      );
+      return;
+    }
+
+    if (
+      trendStartDate &&
+      trendEndDate &&
+      trendStartDate > trendEndDate
+    ) {
+      setTrendError("Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc.");
+      return;
+    }
+
+    setTrendLoading(true);
+    setTrendError("");
+    setTrendResult(null);
+
+    try {
+      const response = await fetch(
+        "http://127.0.0.1:8000/api/hardware/trends",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            dataset_id: multipleResult.dataset_id,
+            granularity: trendGranularity,
+            ...(trendStartDate ? { start_date: trendStartDate } : {}),
+            ...(trendEndDate ? { end_date: trendEndDate } : {}),
+          }),
+        }
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data.detail === "string"
+            ? data.detail
+            : "Không thể phân tích xu hướng."
+        );
+      }
+
+      setTrendResult(data as HardwareTrendResult);
+    } catch (error) {
+      console.error(error);
+      setTrendError(
+        error instanceof Error
+          ? error.message
+          : "Đã xảy ra lỗi khi phân tích xu hướng."
+      );
+    } finally {
+      setTrendLoading(false);
+    }
+  };
+
+  const handleClearMultiple = () => {
+    setMultipleFiles([]);
+    setMultipleResult(null);
+    setMultipleError("");
+    setTrendResult(null);
+    setTrendError("");
+    setTrendStartDate("");
+    setTrendEndDate("");
+
+    const input = document.getElementById(
+      "hardware-multiple-files"
+    ) as HTMLInputElement | null;
+    if (input) {
+      input.value = "";
+    }
   };
 
   // --------------------------------
@@ -892,7 +1294,397 @@ export default function Home() {
 
         </section>
 
+        <section className="upload-card multi-upload-card">
+          <div className="section-heading">
+            <div>
+              <span className="section-number">06</span>
+              <div>
+                <h3>Upload nhiều file &amp; phân tích xu hướng</h3>
+                <p>
+                  Chuẩn hóa và gộp 2–10 file, giữ báo cáo từng file và
+                  nguồn gốc bản ghi trước khi phân tích.
+                </p>
+              </div>
+            </div>
+            {multipleFiles.length > 0 && (
+              <button
+                type="button"
+                className="clear-button"
+                onClick={handleClearMultiple}
+                disabled={multipleLoading || trendLoading}
+              >
+                Xóa lựa chọn
+              </button>
+            )}
+          </div>
 
+          <label
+            htmlFor="hardware-multiple-files"
+            className="production-upload"
+          >
+            <div className="upload-plus">+</div>
+            <div>
+              <strong>Chọn các file dữ liệu</strong>
+              <span>CSV hoặc XLSX · 2–10 file · Tối đa 10MB mỗi file</span>
+            </div>
+          </label>
+          <input
+            id="hardware-multiple-files"
+            type="file"
+            accept=".csv,.xlsx"
+            multiple
+            onChange={handleMultipleFilesChange}
+            disabled={multipleLoading || trendLoading}
+            hidden
+          />
+
+          {multipleFiles.length > 0 && (
+            <div className="multi-selected-files">
+              {multipleFiles.map((file) => (
+                <div className="multi-selected-file" key={`${file.name}-${file.lastModified}`}>
+                  <strong>{file.name}</strong>
+                  <span>{(file.size / 1024).toFixed(1)} KB</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {multipleError && (
+            <div className="error-box" role="alert">
+              <strong>Lỗi</strong>
+              <span>{multipleError}</span>
+            </div>
+          )}
+
+          <div className="upload-footer multi-upload-footer">
+            <div className="upload-hint">
+              <span>6.1–6.5</span>
+              Chuẩn hóa · Gộp · KPI Python · AI diễn giải
+            </div>
+            <button
+              type="button"
+              className="analyze-button"
+              onClick={handleAnalyzeMultiple}
+              disabled={
+                multipleLoading ||
+                trendLoading ||
+                multipleFiles.length < 2 ||
+                multipleFiles.length > 10
+              }
+            >
+              {multipleLoading ? (
+                <>
+                  <span className="spinner" />
+                  Đang kiểm tra và gộp...
+                </>
+              ) : (
+                <>
+                  Kiểm tra &amp; gộp file <span>→</span>
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+
+        {multipleResult && !multipleLoading && (
+          <section
+            id="multi-file-dashboard"
+            className="production-dashboard multi-file-dashboard"
+          >
+            <div className="dashboard-heading">
+              <div>
+                <div className="result-label">MULTI-FILE DATASET</div>
+                <h2>Kiểm tra dữ liệu đã gộp</h2>
+                <p>
+                  File có cảnh báo vẫn được gộp; bản ghi lỗi được giữ lại và
+                  báo cáo, còn bản ghi trùng chỉ được cảnh báo, không tự xóa.
+                </p>
+              </div>
+              <div className="data-file">
+                <span>TRẠNG THÁI</span>
+                <strong>
+                  {multipleResult.status === "completed_with_warnings"
+                    ? "Hoàn tất, có cảnh báo"
+                    : multipleResult.status === "failed"
+                      ? "Không thể gộp"
+                      : "Hoàn tất"}
+                </strong>
+              </div>
+            </div>
+
+            <div className="multi-file-stat-grid">
+              <div className="multi-file-stat">
+                <span>File đã nhận</span>
+                <strong>{multipleResult.files_processed}</strong>
+              </div>
+              <div className="multi-file-stat">
+                <span>File đã gộp</span>
+                <strong>{multipleResult.files_merged}</strong>
+              </div>
+              <div className="multi-file-stat">
+                <span>Dòng sau khi gộp</span>
+                <strong>
+                  {multipleResult.rows_merged.toLocaleString("vi-VN")}
+                </strong>
+              </div>
+              <div className="multi-file-stat">
+                <span>Dòng trùng phát hiện</span>
+                <strong>{multipleResult.duplicate_rows_detected}</strong>
+              </div>
+            </div>
+
+            <section
+              className="dashboard-card multi-file-quality"
+              aria-label="Thống kê chất lượng dữ liệu"
+            >
+              <div className="dashboard-card-header">
+                <div>
+                  <span>01</span>
+                  <h3>Thống kê sử dụng cho KPI</h3>
+                </div>
+                <p>
+                  Số dòng theo từng chỉ tiêu có thể khác nhau và có thể chồng
+                  lấp giữa các nhóm loại trừ.
+                </p>
+              </div>
+              <div className="multi-file-quality-grid">
+                {[
+                  ["production", "Sản lượng"],
+                  ["defects", "Số lỗi"],
+                  ["defect_rate", "Tỷ lệ lỗi"],
+                  ["downtime", "Downtime"],
+                ].map(([metric, label]) => (
+                  <div className="multi-file-quality-metric" key={metric}>
+                    <strong>{label}</strong>
+                    <span>
+                      {multipleResult.rows_valid_for_kpi[
+                        metric as keyof typeof multipleResult.rows_valid_for_kpi
+                      ].toLocaleString("vi-VN")}{" "}
+                      dòng dùng
+                    </span>
+                    <span>
+                      {multipleResult.rows_excluded_from_analysis[
+                        metric as keyof typeof multipleResult.rows_valid_for_kpi
+                      ].toLocaleString("vi-VN")}{" "}
+                      dòng loại trừ
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="multi-file-quality-warning">
+                {multipleResult.rows_with_warnings.toLocaleString("vi-VN")}{" "}
+                dòng có ít nhất một cảnh báo; các bản ghi trùng vẫn được giữ
+                trong dataset.
+              </p>
+              <p className="multi-file-quality-warning">
+                {
+                  multipleResult.rows_excluded_from_analysis.time_series
+                }{" "}
+                dòng không xếp được vào chuỗi thời gian do thiếu hoặc sai ngày.
+              </p>
+            </section>
+
+            <section className="dashboard-card multi-file-reports">
+              <div className="dashboard-card-header">
+                <div>
+                  <span>01</span>
+                  <h3>Báo cáo theo file</h3>
+                </div>
+                <p>
+                  {multipleResult.files_skipped} file bỏ qua ·{" "}
+                  {multipleResult.rows_skipped} dòng không gộp
+                </p>
+              </div>
+              <div className="file-report-list">
+                {multipleResult.file_reports.map((file, fileIndex) => (
+                  <article
+                    className="file-report"
+                    key={`${file.filename}-${file.status}-${fileIndex}`}
+                  >
+                    <div className="file-report-heading">
+                      <div>
+                        <strong>{file.filename}</strong>
+                        <span>
+                          {file.rows_read.toLocaleString("vi-VN")} dòng đọc
+                          {typeof file.rows_merged === "number" &&
+                            ` · ${file.rows_merged.toLocaleString("vi-VN")} dòng đã gộp`}
+                          {typeof file.rows_skipped === "number" &&
+                            file.rows_skipped > 0 &&
+                            ` · ${file.rows_skipped.toLocaleString("vi-VN")} dòng bỏ qua`}
+                          {typeof file.rows_with_warnings === "number" &&
+                            ` · ${file.rows_with_warnings.toLocaleString("vi-VN")} dòng có cảnh báo`}
+                        </span>
+                      </div>
+                      <span
+                        className={`file-status file-status-${file.status}`}
+                      >
+                        {file.status === "merged"
+                          ? "Đã gộp"
+                          : file.status === "merged_with_warnings"
+                            ? "Gộp có cảnh báo"
+                            : file.status === "skipped"
+                              ? "Đã bỏ qua"
+                              : file.status}
+                      </span>
+                    </div>
+                    {file.rows_valid_for_kpi &&
+                      file.rows_excluded_from_analysis && (
+                        <div className="file-report-kpi-counts">
+                          {[
+                            ["production", "Sản lượng"],
+                            ["defects", "Số lỗi"],
+                            ["defect_rate", "Tỷ lệ lỗi"],
+                            ["downtime", "Downtime"],
+                          ].map(([metric, label]) => (
+                            <span key={metric}>
+                              <strong>{label}:</strong>{" "}
+                              {file.rows_valid_for_kpi?.[
+                                metric as keyof typeof file.rows_valid_for_kpi
+                              ].toLocaleString("vi-VN")}{" "}
+                              dùng ·{" "}
+                              {file.rows_excluded_from_analysis?.[
+                                metric as keyof typeof file.rows_valid_for_kpi
+                              ].toLocaleString("vi-VN")}{" "}
+                              loại trừ
+                            </span>
+                          ))}
+                          <span>
+                            <strong>Chuỗi thời gian:</strong>{" "}
+                            {file.rows_excluded_from_analysis.time_series.toLocaleString(
+                              "vi-VN"
+                            )}{" "}
+                            dòng không xếp theo ngày
+                          </span>
+                        </div>
+                      )}
+                    {(file.invalid_dates > 0 ||
+                      file.invalid_numeric_values > 0 ||
+                      file.negative_values > 0 ||
+                      file.missing_required_columns.length > 0 ||
+                      file.error) && (
+                      <div className="file-report-issues">
+                        {file.invalid_dates > 0 && (
+                          <span>{file.invalid_dates} ngày không hợp lệ</span>
+                        )}
+                        {file.invalid_numeric_values > 0 && (
+                          <span>
+                            {file.invalid_numeric_values} giá trị số sai định dạng
+                          </span>
+                        )}
+                        {file.negative_values > 0 && (
+                          <span>{file.negative_values} giá trị âm</span>
+                        )}
+                        {file.missing_required_columns.length > 0 && (
+                          <span>
+                            Thiếu cột: {file.missing_required_columns.join(", ")}
+                          </span>
+                        )}
+                        {file.error && <span>{file.error}</span>}
+                      </div>
+                    )}
+                    {(file.warnings?.length ?? 0) > 0 && (
+                      <ul className="file-report-warnings">
+                        {file.warnings?.map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            {!multipleResult.dataset_id ? (
+              <div className="trend-empty-state" role="status">
+                Không có file hợp lệ để tạo dataset. Hãy kiểm tra báo cáo file,
+                rồi tải lên các file có cột bắt buộc hợp lệ.
+              </div>
+            ) : (
+              <section className="dashboard-card trend-controls-card">
+                <div className="dashboard-card-header">
+                  <div>
+                    <span>02</span>
+                    <h3>Phân tích xu hướng</h3>
+                  </div>
+                  <p>
+                    Dataset lưu tạm trong backend
+                    {multipleResult.dataset_cache_ttl_seconds
+                      ? ` · hết hạn sau ${Math.round(
+                          multipleResult.dataset_cache_ttl_seconds / 60
+                        )} phút`
+                      : ""}
+                  </p>
+                </div>
+                <div className="trend-controls">
+                  <label>
+                    <span>Gộp theo</span>
+                    <select
+                      value={trendGranularity}
+                      onChange={(event) => {
+                        setTrendGranularity(
+                          event.target.value as "day" | "week" | "month"
+                        );
+                        setTrendResult(null);
+                      }}
+                      disabled={trendLoading}
+                    >
+                      <option value="day">Ngày</option>
+                      <option value="week">Tuần (ISO, từ thứ Hai)</option>
+                      <option value="month">Tháng</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Từ ngày (không bắt buộc)</span>
+                    <input
+                      type="date"
+                      value={trendStartDate}
+                      onChange={(event) => {
+                        setTrendStartDate(event.target.value);
+                        setTrendResult(null);
+                      }}
+                      disabled={trendLoading}
+                    />
+                  </label>
+                  <label>
+                    <span>Đến ngày (không bắt buộc)</span>
+                    <input
+                      type="date"
+                      value={trendEndDate}
+                      onChange={(event) => {
+                        setTrendEndDate(event.target.value);
+                        setTrendResult(null);
+                      }}
+                      disabled={trendLoading}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="analyze-button trend-submit"
+                    onClick={handleAnalyzeTrends}
+                    disabled={trendLoading}
+                  >
+                    {trendLoading ? (
+                      <>
+                        <span className="spinner" />
+                        Đang phân tích...
+                      </>
+                    ) : (
+                      <>Phân tích xu hướng <span>→</span></>
+                    )}
+                  </button>
+                </div>
+                {trendError && (
+                  <div className="error-box" role="alert">
+                    <strong>Lỗi</strong>
+                    <span>{trendError}</span>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {trendResult && <HardwareTrendDashboard result={trendResult} />}
+          </section>
+        )}
 
         {/* -------------------------------- */}
         {/* Loading */}
@@ -1723,6 +2515,595 @@ export default function Home() {
 }
 
 
+
+function formatTrendValue(
+  value: number | null | undefined,
+  suffix = ""
+) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "—";
+  }
+  return `${value.toLocaleString("vi-VN", {
+    maximumFractionDigits: 2,
+  })}${suffix}`;
+}
+
+function trendMetricLabel(metric: TrendMetric) {
+  const labels: Record<TrendMetric, string> = {
+    production: "Sản lượng",
+    defects: "Số lỗi",
+    defect_rate: "Tỷ lệ lỗi",
+    downtime: "Downtime",
+  };
+  return labels[metric];
+}
+
+function trendDirectionLabel(direction: TrendDirection) {
+  const labels: Record<TrendDirection, string> = {
+    increasing: "Tăng",
+    decreasing: "Giảm",
+    unchanged: "Ổn định",
+    fluctuating: "Dao động",
+    insufficient_data: "Chưa đủ dữ liệu",
+  };
+  return labels[direction];
+}
+
+function formatPeriod(period: string) {
+  return new Date(`${period}T00:00:00`).toLocaleDateString("vi-VN");
+}
+
+function EvidenceReferences({
+  evidenceIds,
+  evidence,
+}: {
+  evidenceIds: string[];
+  evidence: Record<string, TrendEvidence>;
+}) {
+  if (evidenceIds.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="trend-evidence-refs" aria-label="Bằng chứng dữ liệu">
+      {evidenceIds.map((id) => (
+        <span key={id} title={evidence[id]?.message ?? id}>
+          {id}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function HardwareTrendDashboard({
+  result,
+}: {
+  result: HardwareTrendResult;
+}) {
+  const series = result.time_series;
+  const maxProduction = Math.max(
+    0,
+    ...series.map((point) => point.production)
+  );
+  const maxDefectRate = Math.max(
+    0,
+    ...series.map((point) => point.defect_rate ?? 0)
+  );
+  const ai = result.ai_analysis;
+  const chartMetrics: {
+    key: TrendMetric;
+    label: string;
+    suffix: string;
+    max: number;
+    value: (point: TrendSeriesPoint) => number | null;
+  }[] = [
+    {
+      key: "production",
+      label: "Sản lượng",
+      suffix: "",
+      max: maxProduction,
+      value: (point) => point.production,
+    },
+    {
+      key: "defects",
+      label: "Số lỗi",
+      suffix: "",
+      max: Math.max(0, ...series.map((point) => point.defects)),
+      value: (point) => point.defects,
+    },
+    {
+      key: "defect_rate",
+      label: "Tỷ lệ lỗi",
+      suffix: "%",
+      max: maxDefectRate,
+      value: (point) => point.defect_rate,
+    },
+    {
+      key: "downtime",
+      label: "Downtime",
+      suffix: "",
+      max: Math.max(0, ...series.map((point) => point.downtime)),
+      value: (point) => point.downtime,
+    },
+  ];
+
+  return (
+    <section className="trend-dashboard">
+      <div className="dashboard-heading trend-dashboard-heading">
+        <div>
+          <div className="result-label">PRODUCTION TRENDS</div>
+          <h2>Xu hướng sản xuất</h2>
+          <p>
+            Theo{" "}
+            {result.granularity === "day"
+              ? "ngày"
+              : result.granularity === "week"
+                ? "tuần ISO (bắt đầu thứ Hai)"
+                : "tháng"}
+            {result.requested_range.start_date &&
+              ` · từ ${formatPeriod(result.requested_range.start_date)}`}
+            {result.requested_range.end_date &&
+              ` đến ${formatPeriod(result.requested_range.end_date)}`}
+          </p>
+        </div>
+        <span
+          className={`trend-status ${
+            result.status === "completed_with_warnings"
+              ? "trend-status-warning"
+              : ""
+          }`}
+        >
+          {result.status === "completed_with_warnings"
+            ? "Có cảnh báo dữ liệu"
+            : "Hoàn tất"}
+        </span>
+      </div>
+
+      <div className="trend-kpi-grid">
+        {[
+          {
+            label: "Tổng sản lượng",
+            value: formatTrendValue(result.summary.totals.production),
+            trend: result.summary.overall_trends.production,
+          },
+          {
+            label: "Tổng số lỗi",
+            value: formatTrendValue(result.summary.totals.defects),
+            trend: result.summary.overall_trends.defects,
+          },
+          {
+            label: "Tỷ lệ lỗi tổng thể",
+            value: formatTrendValue(result.summary.totals.defect_rate, "%"),
+            trend: result.summary.overall_trends.defect_rate,
+          },
+          {
+            label: "Tổng downtime",
+            value: formatTrendValue(result.summary.totals.downtime),
+            trend: result.summary.overall_trends.downtime,
+          },
+        ].map((item) => (
+          <article className="trend-kpi" key={item.label}>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+            <small
+              className={`trend-direction trend-direction-${item.trend.direction}`}
+            >
+              {trendDirectionLabel(item.trend.direction)}
+              {item.trend.absolute_change !== null &&
+                item.trend.direction !== "insufficient_data" &&
+                ` · Δ ${formatTrendValue(item.trend.absolute_change)}${
+                  item.label === "Tỷ lệ lỗi tổng thể" ? " điểm %" : ""
+                }`}
+            </small>
+          </article>
+        ))}
+      </div>
+
+      {result.warnings.length > 0 && (
+        <div className="trend-warning-list">
+          <strong>Lưu ý chất lượng dữ liệu</strong>
+          <ul>
+            {result.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="trend-record-summary">
+        <span>
+          {result.summary.rows_used.toLocaleString("vi-VN")} dòng dùng cho
+          Production
+        </span>
+        <span>
+          {result.summary.rows_excluded.toLocaleString("vi-VN")} dòng không
+          hợp lệ cho Production
+        </span>
+        <span>
+          {result.summary.periods_count.toLocaleString("vi-VN")} kỳ có dữ liệu
+        </span>
+        {(result.summary.invalid_date_rows > 0 ||
+          result.summary.missing_date_rows > 0) && (
+          <span>
+            {result.summary.invalid_date_rows +
+              result.summary.missing_date_rows}{" "}
+            dòng không xếp được theo ngày
+          </span>
+        )}
+      </div>
+      <div
+        className="trend-record-metrics"
+        aria-label="Số dòng được dùng và loại trừ theo chỉ tiêu"
+      >
+        {[
+          ["production", "Sản lượng"],
+          ["defects", "Số lỗi"],
+          ["defect_rate", "Tỷ lệ lỗi"],
+          ["downtime", "Downtime"],
+        ].map(([metric, label]) => (
+          <div className="trend-record-metric" key={metric}>
+            <strong>{label}</strong>
+            <span>
+              {result.summary.records_used[
+                metric as keyof typeof result.summary.records_used
+              ].toLocaleString("vi-VN")}{" "}
+              dòng dùng
+            </span>
+            <span>
+              {result.summary.records_excluded[
+                metric as keyof typeof result.summary.records_used
+              ].toLocaleString("vi-VN")}{" "}
+              dòng loại trừ
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <section className="dashboard-card trend-chart-card">
+        <div className="dashboard-card-header">
+          <div>
+            <span>03</span>
+            <h3>Biểu đồ theo kỳ</h3>
+          </div>
+          <p>Chỉ hiển thị kỳ có dữ liệu; không tự điền kỳ trống bằng 0</p>
+        </div>
+        {series.length === 0 ? (
+          <div className="trend-empty-state">
+            Không có bản ghi hợp lệ trong khoảng thời gian đã chọn.
+          </div>
+        ) : (
+          <div className="trend-chart-grid">
+            {chartMetrics.map((metric) => (
+              <div className="trend-chart" key={metric.key}>
+                <h4>{metric.label}</h4>
+                <div className="trend-chart-plot">
+                  {series.map((point) => {
+                    const value = metric.value(point);
+                    const height =
+                      value !== null && metric.max > 0
+                        ? Math.max(4, (value / metric.max) * 100)
+                        : 0;
+                    return (
+                      <div
+                        className="trend-chart-column"
+                        key={`${metric.key}-${point.period_start}`}
+                      >
+                        <strong>
+                          {formatTrendValue(value, metric.suffix)}
+                        </strong>
+                        <div className="trend-chart-track">
+                          <div
+                            className={`trend-chart-bar trend-${metric.key}-bar`}
+                            style={{ height: `${height}%` }}
+                          />
+                        </div>
+                        <span>{formatPeriod(point.period_start)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {series.length > 0 && (
+          <div className="trend-series-table-wrapper">
+            <table className="machine-table trend-series-table">
+              <thead>
+                <tr>
+                  <th>Kỳ</th>
+                  <th>Sản lượng</th>
+                  <th>Số lỗi</th>
+                  <th>Tỷ lệ lỗi</th>
+                  <th>Downtime</th>
+                  <th>Dòng dùng / tổng</th>
+                </tr>
+              </thead>
+              <tbody>
+                {series.map((point) => (
+                  <tr key={`table-${point.period_start}`}>
+                    <td>{formatPeriod(point.period_start)}</td>
+                    <td>{formatTrendValue(point.production)}</td>
+                    <td>{formatTrendValue(point.defects)}</td>
+                    <td>{formatTrendValue(point.defect_rate, "%")}</td>
+                    <td>{formatTrendValue(point.downtime)}</td>
+                    <td>
+                      {point.rows_used} / {point.rows_in_period}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="dashboard-card trend-changes-card">
+        <div className="dashboard-card-header">
+          <div>
+            <span>04</span>
+            <h3>Biến động giữa các kỳ</h3>
+          </div>
+          <p>Tỷ lệ lỗi chênh lệch được biểu thị theo điểm phần trăm</p>
+        </div>
+        {result.period_changes.length === 0 ? (
+          <div className="trend-empty-state">
+            Cần ít nhất hai kỳ có dữ liệu để tính mức thay đổi.
+          </div>
+        ) : (
+          <div className="trend-series-table-wrapper">
+            <table className="machine-table trend-series-table">
+              <thead>
+                <tr>
+                  <th>Kỳ</th>
+                  <th>Δ Sản lượng</th>
+                  <th>Δ Số lỗi</th>
+                  <th>Δ Tỷ lệ lỗi</th>
+                  <th>Δ Downtime</th>
+                  <th>Kỳ trống xen giữa</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.period_changes.map((change) => (
+                  <tr key={`change-${change.period_start}`}>
+                    <td>{formatPeriod(change.period_start)}</td>
+                    <td>
+                      {formatTrendValue(change.production_delta)}
+                      {change.production_change_percent !== null &&
+                        ` (${formatTrendValue(
+                          change.production_change_percent,
+                          "%"
+                        )})`}
+                    </td>
+                    <td>
+                      {formatTrendValue(change.defects_delta)}
+                      {change.defects_change_percent !== null &&
+                        ` (${formatTrendValue(
+                          change.defects_change_percent,
+                          "%"
+                        )})`}
+                    </td>
+                    <td>
+                      {formatTrendValue(
+                        change.defect_rate_delta_percentage_points,
+                        " điểm %"
+                      )}
+                    </td>
+                    <td>
+                      {formatTrendValue(change.downtime_delta)}
+                      {change.downtime_change_percent !== null &&
+                        ` (${formatTrendValue(
+                          change.downtime_change_percent,
+                          "%"
+                        )})`}
+                    </td>
+                    <td>{change.missing_periods_between}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="dashboard-card trend-anomalies-card">
+        <div className="dashboard-card-header">
+          <div>
+            <span>05</span>
+            <h3>Cảnh báo biến động</h3>
+          </div>
+          <p>
+            Cảnh báo thống kê để ưu tiên kiểm tra, không phải xác nhận lỗi
+            hay nguyên nhân
+          </p>
+        </div>
+        {result.anomalies.length === 0 ? (
+          <div className="trend-empty-state">
+            Không phát hiện biến động vượt ngưỡng trong các kỳ đã chọn.
+          </div>
+        ) : (
+          <div className="trend-anomaly-list">
+            {result.anomalies.map((anomaly, index) => (
+              <article
+                className="trend-anomaly"
+                key={`${anomaly.type}-${anomaly.period_start}-${index}`}
+              >
+                <span className="trend-anomaly-badge">Đáng chú ý</span>
+                <div>
+                  <strong>{anomaly.message}</strong>
+                  <p>
+                    {formatPeriod(anomaly.previous_period_start)} →{" "}
+                    {formatPeriod(anomaly.period_start)}
+                    {anomaly.observed_change_percent !== undefined &&
+                      ` · ${formatTrendValue(
+                        anomaly.observed_change_percent,
+                        "%"
+                      )}`}
+                    {anomaly.observed_change_percentage_points !== undefined &&
+                      ` · ${formatTrendValue(
+                        anomaly.observed_change_percentage_points,
+                        " điểm %"
+                      )}`}
+                  </p>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+        <div className="trend-thresholds">
+          Ngưỡng: sản lượng giảm ≥{" "}
+          {formatTrendValue(
+            Number(result.anomaly_thresholds.production_drop_percent),
+            "%"
+          )}
+          {" · "}số lỗi tăng ≥{" "}
+          {formatTrendValue(
+            Number(result.anomaly_thresholds.defects_increase_percent),
+            "%"
+          )}
+          {" · "}tỷ lệ lỗi tăng ≥{" "}
+          {formatTrendValue(
+            Number(
+              result.anomaly_thresholds
+                .defect_rate_increase_percentage_points
+            ),
+            " điểm %"
+          )}
+          {" · "}downtime tăng ≥{" "}
+          {formatTrendValue(
+            Number(result.anomaly_thresholds.downtime_increase_percent),
+            "%"
+          )}
+        </div>
+      </section>
+
+      <section
+        className={`dashboard-card trend-ai-card ${
+          result.ai_status === "unavailable" ? "trend-ai-unavailable" : ""
+        }`}
+      >
+        <div className="dashboard-card-header">
+          <div>
+            <span>06</span>
+            <h3>AI giải thích xu hướng</h3>
+          </div>
+          <p>
+            {result.ai_status === "available"
+              ? "Nhận định có trích dẫn bằng chứng Python"
+              : "AI hiện không khả dụng"}
+          </p>
+        </div>
+        {result.ai_status === "unavailable" || !ai ? (
+          <div className="trend-ai-fallback" role="status">
+            <strong>Vẫn giữ nguyên kết quả thống kê Python</strong>
+            <p>
+              {result.ai_error ??
+                "Dịch vụ AI hiện không khả dụng. Vui lòng thử lại sau."}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="trend-ai-summary">
+              <span>{ai.title}</span>
+              <p>{ai.summary}</p>
+              <EvidenceReferences
+                evidenceIds={ai.summary_evidence_ids}
+                evidence={ai.evidence}
+              />
+            </div>
+
+            <div className="trend-ai-grid">
+              <div className="trend-ai-panel">
+                <h4>Diễn giải xu hướng</h4>
+                {ai.trend_interpretation.map((item, index) => (
+                  <article
+                    className="trend-ai-item"
+                    key={`${item.metric}-${index}`}
+                  >
+                    <div>
+                      <strong>{trendMetricLabel(item.metric)}</strong>
+                      <span className={`trend-direction trend-direction-${item.direction}`}>
+                        {trendDirectionLabel(item.direction)}
+                      </span>
+                    </div>
+                    <p>{item.observation}</p>
+                    <EvidenceReferences
+                      evidenceIds={item.evidence_ids}
+                      evidence={ai.evidence}
+                    />
+                  </article>
+                ))}
+              </div>
+
+              <div className="trend-ai-panel">
+                <h4>Khu vực rủi ro cần ưu tiên</h4>
+                {ai.risk_areas.length === 0 ? (
+                  <p className="trend-ai-muted">
+                    AI không xếp hạng thêm khu vực rủi ro.
+                  </p>
+                ) : (
+                  ai.risk_areas.map((risk, index) => (
+                    <article className="trend-ai-item" key={`${risk.area}-${index}`}>
+                      <div>
+                        <strong>{risk.area.replaceAll("_", " ")}</strong>
+                        <span className={`priority-badge priority-${risk.priority}`}>
+                          {risk.priority}
+                        </span>
+                      </div>
+                      <p>{risk.reason}</p>
+                      <EvidenceReferences
+                        evidenceIds={risk.evidence_ids}
+                        evidence={ai.evidence}
+                      />
+                    </article>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="trend-ai-panel trend-actions-panel">
+              <h4>Đề xuất bước kiểm tra</h4>
+              <div className="trend-action-list">
+                {ai.recommended_actions.map((action, index) => (
+                  <article
+                    className="trend-ai-item"
+                    key={`${action.action}-${index}`}
+                  >
+                    <div>
+                      <strong>{action.action}</strong>
+                      <span className={`priority-badge priority-${action.priority}`}>
+                        {action.priority}
+                      </span>
+                    </div>
+                    <p>{action.purpose}</p>
+                    <EvidenceReferences
+                      evidenceIds={action.evidence_ids}
+                      evidence={ai.evidence}
+                    />
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className="trend-limitations">
+              <strong>Giới hạn kết luận</strong>
+              <ul>
+                {ai.limitations.map((limitation) => (
+                  <li key={limitation}>{limitation}</li>
+                ))}
+              </ul>
+              <p>
+                Tương quan giữa downtime và tỷ lệ lỗi không tự chứng minh quan
+                hệ nhân quả. Xác minh thêm bằng nhật ký máy, lịch sản xuất và
+                phân bố lỗi theo model hoặc lô.
+              </p>
+            </div>
+          </>
+        )}
+      </section>
+    </section>
+  );
+}
 
 /* -------------------------------- */
 /* KPI Card */

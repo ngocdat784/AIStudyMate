@@ -232,6 +232,45 @@ class HardwareAnalysisTests(unittest.TestCase):
             )
         )
 
+    def test_malformed_thousands_grouping_is_excluded_from_hardware_kpis(self):
+        dataframe = pd.DataFrame(
+            [
+                {
+                    "Product": "Product A",
+                    "Model": "Model A",
+                    "Component": "Screen",
+                    "Supplier": "Supplier A",
+                    "Batch": "Batch 1",
+                    "Production": "1,200",
+                    "Defects": "12",
+                    "Downtime": "5",
+                    "Date": "2026-10-01",
+                },
+                {
+                    "Product": "Product B",
+                    "Model": "Model B",
+                    "Component": "Keyboard",
+                    "Supplier": "Supplier B",
+                    "Batch": "Batch 2",
+                    "Production": "1,2",
+                    "Defects": "2",
+                    "Downtime": "1",
+                    "Date": "2026-10-02",
+                },
+            ]
+        )
+
+        kpis = hardware_service.calculate_hardware_kpis(dataframe)
+
+        self.assertEqual(kpis["total_production"], 1200)
+        self.assertEqual(kpis["total_defects"], 12)
+        self.assertEqual(kpis["data_quality"]["invalid_values"]["Production"], 1)
+        self.assertEqual(kpis["data_processing"]["rows_used_for_kpi"], 1)
+        self.assertEqual(
+            kpis["data_processing"]["invalid_metric_rows_excluded_by_metric"],
+            {"production": 1, "defects": 0, "downtime": 0},
+        )
+
     def test_missing_defect_type_is_not_a_data_quality_violation(self):
         row = {
             "Product": "Product A",

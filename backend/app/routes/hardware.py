@@ -1,13 +1,32 @@
+import csv
 import io
 import logging
+import math
+from datetime import date, datetime
+from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, ConfigDict
 
-from app.services.hardware_ai_service import analyze_hardware_comparison
+from app.services.hardware_ai_service import (
+    analyze_hardware_comparison,
+    analyze_hardware_trends_with_ai,
+)
 from app.services.hardware_service import (
     analyze_hardware_dataframe,
     compare_hardware_models,
+)
+from app.services.multi_file_service import (
+    DATASET_CACHE_TTL_SECONDS,
+    get_merged_hardware_dataset,
+    merge_normalized_hardware_files,
+    normalize_hardware_files,
+    store_merged_hardware_dataset,
+)
+from app.services.hardware_trend_service import (
+    Granularity,
+    analyze_hardware_trends,
 )
 
 
@@ -18,10 +37,142 @@ router = APIRouter(
 
 logger = logging.getLogger(__name__)
 MAX_FILE_SIZE = 10 * 1024 * 1024
+MAX_MULTIPLE_FILES = 10
 AI_UNAVAILABLE_MESSAGE = (
     "Dịch vụ AI hiện tạm thời không khả dụng. "
     "Các chỉ số so sánh được tính bằng Python vẫn có thể sử dụng."
 )
+TREND_AI_UNAVAILABLE_MESSAGE = (
+    "Dịch vụ AI hiện tạm thời không khả dụng. "
+    "Kết quả thống kê xu hướng do Python tính vẫn có thể sử dụng."
+)
+
+
+class HardwareTrendRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dataset_id: str
+    granularity: Granularity
+    start_date: date | None = None
+    end_date: date | None = None
+
+
+def _json_safe_cell(value: Any) -> Any:
+    if value is None or value is pd.NA or value is pd.NaT:
+        return None
+    if isinstance(value, (pd.Timestamp, datetime, date)):
+        return value.isoformat()
+    if hasattr(value, "item"):
+        return _json_safe_cell(value.item())
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    try:
+        if bool(pd.isna(value)):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _read_csv_robust(content: bytes) -> pd.DataFrame:
+    if not content:
+        raise ValueError("File CSV không chứa dữ liệu.")
+
+    encodings = (
+        "utf-8-sig",
+        "utf-8",
+        "utf-16",
+        "cp1258",
+        "latin-1",
+    )
+    delimiters = (";", ",", "\t", "|")
+    last_error: Exception | None = None
+
+    for encoding in encodings:
+        try:
+            text = content.decode(encoding, errors="strict")
+        except UnicodeDecodeError as error:
+            last_error = error
+            continue
+
+        text = text.lstrip("\ufeff")
+        if not text.strip():
+            raise ValueError("File CSV không chứa dữ liệu.")
+
+        lines = text.splitlines()
+        nonempty_lines = [line for line in lines if line.strip()]
+        if nonempty_lines and all(
+            line.strip().startswith('"') and line.strip().endswith('"')
+            for line in nonempty_lines
+        ):
+            text = "\n".join(
+                line.strip()[1:-1] if line.strip() else line
+                for line in lines
+            )
+
+        first_line = next(
+            (line for line in text.splitlines() if line.strip()),
+            "",
+        )
+        if not first_line:
+            raise ValueError("File CSV không chứa dòng tiêu đề.")
+
+        ordered_delimiters = sorted(
+            delimiters,
+            key=first_line.count,
+            reverse=True,
+        )
+
+        for delimiter in ordered_delimiters:
+            if first_line.count(delimiter) == 0:
+                continue
+
+            for quoting in (csv.QUOTE_MINIMAL, csv.QUOTE_NONE):
+                try:
+                    dataframe = pd.read_csv(
+                        io.StringIO(text),
+                        sep=delimiter,
+                        engine="python",
+                        dtype=object,
+                        quoting=quoting,
+                    )
+                except (pd.errors.ParserError, ValueError) as error:
+                    last_error = error
+                    continue
+
+                dataframe.columns = [
+                    str(column).strip().strip('"').lstrip("\ufeff")
+                    for column in dataframe.columns
+                ]
+                if len(dataframe.columns) > 1:
+                    return dataframe
+
+        if not any(first_line.count(delimiter) for delimiter in delimiters):
+            try:
+                dataframe = pd.read_csv(
+                    io.StringIO(text),
+                    dtype=object,
+                    engine="python",
+                )
+            except (pd.errors.ParserError, ValueError) as error:
+                last_error = error
+                continue
+
+            dataframe.columns = [
+                str(column).strip().strip('"').lstrip("\ufeff")
+                for column in dataframe.columns
+            ]
+            return dataframe
+
+    if last_error is not None:
+        raise ValueError(
+            f"Không thể đọc CSV: {last_error}"
+        ) from last_error
+    raise ValueError(
+        "Không thể đọc file CSV với các encoding được hỗ trợ."
+    )
 
 
 async def _read_hardware_upload(file: UploadFile) -> pd.DataFrame:
@@ -45,64 +196,34 @@ async def _read_hardware_upload(file: UploadFile) -> pd.DataFrame:
             detail="File không được vượt quá 10MB.",
         )
 
+    if not content:
+        raise HTTPException(
+            status_code=400,
+            detail="File tải lên đang trống.",
+        )
+
     if extension == ".csv":
-        dataframe = None
-        last_error = None
-
-        for encoding in ("utf-8-sig", "utf-8", "cp1258", "latin-1"):
-            try:
-                text = content.decode(encoding, errors="strict")
-                lines = [
-                    line.strip()
-                    for line in text.splitlines()
-                    if line.strip()
-                ]
-                if not lines:
-                    raise ValueError("File CSV không có dữ liệu.")
-
-                raw_header = lines[0]
-                delimiter = (
-                    ";"
-                    if raw_header.count(";") > raw_header.count(",")
-                    else ","
-                )
-                header = raw_header.strip()
-                if header.startswith('"') and header.endswith('"'):
-                    header = header[1:-1]
-                columns = [
-                    column.strip().strip('"').strip("'")
-                    for column in header.split(delimiter)
-                ]
-
-                rows = []
-                for line in lines[1:]:
-                    cleaned_line = line.strip()
-                    if (
-                        cleaned_line.startswith('"')
-                        and cleaned_line.endswith('"')
-                    ):
-                        cleaned_line = cleaned_line[1:-1]
-                    values = [
-                        value.strip().strip('"').strip("'")
-                        for value in cleaned_line.split(delimiter)
-                    ]
-                    if len(values) < len(columns):
-                        values.extend([None] * (len(columns) - len(values)))
-                    else:
-                        values = values[:len(columns)]
-                    rows.append(values)
-
-                dataframe = pd.DataFrame(rows, columns=columns)
-                dataframe.columns = (
-                    dataframe.columns.astype(str).str.strip()
-                )
-                break
-            except Exception as error:
-                last_error = error
-                dataframe = None
-
-        if dataframe is None:
-            raise last_error or ValueError("Không thể đọc file CSV.")
+        logger.warning(
+            "CSV RAW | filename=%s | size=%d | first_bytes=%r",
+            file.filename,
+            len(content),
+            content[:120],
+        )
+        logger.warning(
+            "CSV TEXT | filename=%s | preview=%r",
+            file.filename,
+            content[:500].decode(
+                "utf-8",
+                errors="backslashreplace",
+            ),
+        )
+        dataframe = _read_csv_robust(content)
+        logger.warning(
+            "CSV DEBUG | filename=%s | columns=%s | shape=%s",
+            file.filename,
+            dataframe.columns.tolist(),
+            dataframe.shape,
+        )
     else:
         excel = pd.ExcelFile(
             io.BytesIO(content),
@@ -195,3 +316,162 @@ async def compare_hardware(
             status_code=500,
             detail=str(error),
         ) from error
+
+
+@router.post("/analyze-multiple")
+async def analyze_hardware_multiple(
+    files: list[UploadFile] = File(
+        ...,
+        description="Upload 2–10 file CSV hoặc XLSX.",
+        json_schema_extra={
+            "items": {
+                "type": "string",
+                "format": "binary",
+            }
+        },
+    ),
+):
+    """Normalize, validate, and merge uploaded hardware files."""
+    if len(files) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Vui lòng tải lên ít nhất hai file dữ liệu.",
+        )
+
+    if len(files) > MAX_MULTIPLE_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chỉ hỗ trợ tối đa {MAX_MULTIPLE_FILES} file mỗi lần.",
+        )
+
+    upload_results = []
+
+    for file in files:
+        filename = file.filename or "File không tên"
+        try:
+            dataframe = await _read_hardware_upload(file)
+        except HTTPException as error:
+            upload_results.append(
+                {
+                    "filename": filename,
+                    "error": error.detail,
+                }
+            )
+        except Exception as error:
+            logger.exception(
+                "Could not read uploaded hardware file %r",
+                file.filename,
+            )
+            upload_results.append(
+                {
+                    "filename": filename,
+                    "error": f"Không thể đọc file: {error}",
+                }
+            )
+        else:
+            upload_results.append(
+                {
+                    "filename": filename,
+                    "dataframe": dataframe,
+                }
+            )
+
+    result = normalize_hardware_files(upload_results)
+    merged = merge_normalized_hardware_files(result)
+    dataset_id = (
+        store_merged_hardware_dataset(merged.dataframe)
+        if merged.report["files_merged"] > 0
+        else None
+    )
+    normalized_files = []
+    for prepared_file, file_report in zip(
+        result.files,
+        merged.report["file_reports"],
+    ):
+        dataframe = prepared_file.dataframe
+        preview = []
+        if dataframe is not None:
+            for row in dataframe.head(5).to_dict(orient="records"):
+                preview_row = {}
+                for column, value in row.items():
+                    preview_row[column] = _json_safe_cell(value)
+                preview.append(preview_row)
+
+        normalized_files.append(
+            {
+                "filename": prepared_file.filename,
+                "status": file_report["status"],
+                "source_column": prepared_file.report.get("source_column"),
+                "row_count": prepared_file.report["rows_read"],
+                "columns": dataframe.columns.tolist()
+                if dataframe is not None
+                else [],
+                "preview": preview,
+            }
+        )
+
+    return {
+        **result.report,
+        **merged.report,
+        "file_count": len(result.files),
+        "dataset_id": dataset_id,
+        "dataset_cache_ttl_seconds": (
+            DATASET_CACHE_TTL_SECONDS if dataset_id else None
+        ),
+        "total_rows": sum(
+            item.report["rows_read"] for item in result.files
+        ),
+        "merged_rows": [
+            {
+                column: _json_safe_cell(value)
+                for column, value in row.items()
+            }
+            for row in merged.dataframe.to_dict(orient="records")
+        ],
+        "files": normalized_files,
+    }
+
+
+@router.post("/trends")
+async def analyze_hardware_trend(request: HardwareTrendRequest):
+    dataframe = get_merged_hardware_dataset(request.dataset_id)
+    if dataframe is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Không tìm thấy dataset hoặc dataset đã hết hạn. "
+                "Vui lòng gộp lại các file để nhận dataset_id mới."
+            ),
+        )
+
+    try:
+        result = analyze_hardware_trends(
+            dataframe,
+            granularity=request.granularity,
+            start_date=request.start_date,
+            end_date=request.end_date,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=str(error),
+        ) from error
+
+    try:
+        result["ai_analysis"] = analyze_hardware_trends_with_ai(result)
+        result["ai_status"] = "available"
+    except Exception as exc:
+        logger.exception(
+            "Hardware trend AI analysis failed: %s",
+            str(exc),
+        )
+        if hasattr(exc, "message"):
+            logger.error(
+                "Gemini API error detail: %s",
+                exc.message,
+            )
+        result["ai_analysis"] = None
+        result["ai_status"] = "unavailable"
+        result["ai_error"] = TREND_AI_UNAVAILABLE_MESSAGE
+
+    return result

@@ -146,12 +146,15 @@ def _to_numeric(series: pd.Series) -> pd.Series:
     Supports comma-separated thousands and a trailing percent sign.
     Assumes commas are thousands separators, not decimal separators.
     """
-    values = (
-        series.astype("string")
-        .str.strip()
-        .str.replace(",", "", regex=False)
-        .str.replace("%", "", regex=False)
+    values = series.astype("string").str.strip()
+    comma_values = values.str.contains(",", regex=False, na=False)
+    valid_thousands_values = values.str.fullmatch(
+        r"[+-]?\d{1,3}(?:,\d{3})+(?:\.\d*)?(?:[eE][+-]?\d+)?%?",
+        na=False,
     )
+    values = values.mask(comma_values & ~valid_thousands_values)
+    values = values.str.replace(",", "", regex=False)
+    values = values.str.replace("%", "", regex=False)
 
     return pd.to_numeric(
         values,

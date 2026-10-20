@@ -2,6 +2,7 @@
 # app/services/hardware_ai_service.py
 
 import json
+import logging
 import math
 import re
 from datetime import date, datetime
@@ -15,6 +16,7 @@ from app.services.gemini_retry import call_gemini_with_retry
 
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -126,6 +128,53 @@ class HardwareComparisonAnalysis(StrictModel):
     )
 
 
+class HardwareTrendInterpretation(StrictModel):
+    metric: Literal["production", "defects", "defect_rate", "downtime"]
+    direction: Literal[
+        "increasing",
+        "decreasing",
+        "unchanged",
+        "fluctuating",
+        "insufficient_data",
+    ]
+    observation: str = Field(min_length=1, max_length=500)
+    evidence_ids: list[str] = Field(min_length=1, max_length=10)
+
+
+class HardwareTrendRiskArea(StrictModel):
+    area: Literal[
+        "production_stability",
+        "quality",
+        "downtime",
+        "data_quality",
+    ]
+    priority: Literal["low", "medium", "high", "critical"]
+    reason: str = Field(min_length=1, max_length=500)
+    evidence_ids: list[str] = Field(min_length=1, max_length=10)
+
+
+class HardwareTrendRecommendedAction(StrictModel):
+    action: str = Field(min_length=1, max_length=500)
+    purpose: str = Field(min_length=1, max_length=500)
+    priority: Literal["low", "medium", "high", "critical"]
+    evidence_ids: list[str] = Field(min_length=1, max_length=10)
+
+
+class HardwareTrendAnalysis(StrictModel):
+    summary: str = Field(min_length=1, max_length=1000)
+    summary_evidence_ids: list[str] = Field(min_length=1, max_length=10)
+    trend_interpretation: list[HardwareTrendInterpretation] = Field(
+        min_length=1,
+        max_length=4,
+    )
+    risk_areas: list[HardwareTrendRiskArea] = Field(max_length=10)
+    recommended_actions: list[HardwareTrendRecommendedAction] = Field(
+        min_length=1,
+        max_length=10,
+    )
+    limitations: list[str] = Field(min_length=1, max_length=10)
+
+
 def _gemini_response_schema(
     model: type[BaseModel],
 ) -> dict[str, Any]:
@@ -134,7 +183,12 @@ def _gemini_response_schema(
             return {
                 key: remove_unsupported_keywords(item)
                 for key, item in value.items()
-                if key != "additionalProperties"
+                if key
+                not in {
+                    "additionalProperties",
+                    "maxLength",
+                    "minLength",
+                }
             }
         if isinstance(value, list):
             return [remove_unsupported_keywords(item) for item in value]
@@ -1559,3 +1613,252 @@ def analyze_hardware_comparison(
         ) from exc
 
     return analysis.model_dump()
+
+
+def _build_hardware_trend_evidence(
+    report: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    evidence: dict[str, dict[str, Any]] = {}
+    summary = report.get("summary", {})
+
+    for metric, trend in summary.get("overall_trends", {}).items():
+        evidence[f"trend_{metric}"] = {
+            "type": "overall_trend",
+            "metric": metric,
+            **trend,
+        }
+
+    time_series = report.get("time_series", [])
+    if time_series:
+        evidence["period_first"] = {
+            "type": "period",
+            **time_series[0],
+        }
+        if len(time_series) > 1:
+            evidence["period_last"] = {
+                "type": "period",
+                **time_series[-1],
+            }
+
+    changes = report.get("period_changes", [])
+    anomalies = report.get("anomalies", [])
+    ranked_anomalies = sorted(
+        enumerate(anomalies),
+        key=lambda item: max(
+            abs(value)
+            for key, value in item[1].items()
+            if key.startswith("observed_change")
+            and isinstance(value, (int, float))
+        ),
+        reverse=True,
+    )[:10]
+    anomaly_periods = {
+        anomaly.get("period_start")
+        for _, anomaly in ranked_anomalies
+        if anomaly.get("period_start")
+    }
+
+    def change_score(change: dict[str, Any]) -> float:
+        values = [
+            abs(value)
+            for key, value in change.items()
+            if key.endswith("_change_percent")
+            or key == "defect_rate_delta_percentage_points"
+            if isinstance(value, (int, float))
+        ]
+        return max(values, default=0.0)
+
+    ranked_changes = sorted(
+        changes,
+        key=change_score,
+        reverse=True,
+    )
+    selected_periods = {
+        item.get("period_start")
+        for item in ranked_changes[:10]
+        if item.get("period_start")
+    }
+    selected_periods.update(anomaly_periods)
+
+    for index, change in enumerate(changes):
+        if change.get("period_start") in selected_periods:
+            evidence[f"change_{index}"] = {
+                "type": "period_change",
+                **change,
+            }
+
+    for index, anomaly in ranked_anomalies:
+        evidence[f"anomaly_{index}"] = {
+            **anomaly,
+            "evidence_kind": "anomaly",
+        }
+
+    return _clean_for_json(evidence)
+
+
+def _validate_hardware_trend_analysis(
+    analysis: HardwareTrendAnalysis,
+    evidence: dict[str, dict[str, Any]],
+    report: dict[str, Any],
+) -> None:
+    cited_ids = {
+        evidence_id
+        for item in [
+            *analysis.trend_interpretation,
+            *analysis.risk_areas,
+            *analysis.recommended_actions,
+        ]
+        for evidence_id in item.evidence_ids
+    }
+    cited_ids.update(analysis.summary_evidence_ids)
+    unknown_ids = cited_ids.difference(evidence)
+    if unknown_ids:
+        raise ValueError(
+            "AI tham chiếu evidence không tồn tại: "
+            f"{sorted(unknown_ids)}"
+        )
+
+    overall_trends = report.get("summary", {}).get("overall_trends", {})
+    changes = report.get("period_changes", [])
+    for item in analysis.trend_interpretation:
+        trend = overall_trends.get(item.metric)
+        if trend is None:
+            raise ValueError(
+                "Nhận xét xu hướng đề cập metric không có trong báo cáo."
+            )
+
+        delta_key = (
+            "defect_rate_delta_percentage_points"
+            if item.metric == "defect_rate"
+            else f"{item.metric}_delta"
+        )
+        observed_signs = {
+            1 if change[delta_key] > 0 else -1
+            for change in changes
+            if isinstance(change.get(delta_key), (int, float))
+            and change[delta_key] != 0
+        }
+        allowed_directions = {trend["direction"]}
+        if observed_signs == {-1, 1}:
+            allowed_directions.add("fluctuating")
+        if item.direction not in allowed_directions:
+            raise ValueError(
+                "Hướng xu hướng AI đưa ra không khớp kết quả Python."
+            )
+
+    narrative_text = [
+        analysis.summary,
+        *[item.observation for item in analysis.trend_interpretation],
+        *[item.reason for item in analysis.risk_areas],
+        *[
+            text
+            for item in analysis.recommended_actions
+            for text in (item.action, item.purpose)
+        ],
+        *analysis.limitations,
+    ]
+    if any(re.search(r"\d", text) for text in narrative_text):
+        raise ValueError(
+            "Nhận xét xu hướng chứa số liệu hoặc kỳ chưa được xác thực."
+        )
+
+
+def analyze_hardware_trends_with_ai(
+    report: dict[str, Any],
+) -> dict[str, Any]:
+    evidence = _build_hardware_trend_evidence(report)
+    context = {
+        "granularity": report.get("granularity"),
+        "requested_range": report.get("requested_range"),
+        "summary": report.get("summary"),
+        "anomaly_thresholds": report.get("anomaly_thresholds"),
+        "warnings": report.get("warnings", []),
+        "evidence": evidence,
+    }
+    prompt = (
+        "Bạn là chuyên gia phân tích xu hướng sản xuất phần cứng. "
+        "Hãy tạo báo cáo bằng tiếng Việt dựa duy nhất trên dữ liệu Python "
+        "đã tổng hợp bên dưới. Không tính lại, thay đổi hoặc bổ sung KPI; "
+        "không nêu con số, ngày tháng hay tên kỳ trong phần văn bản. "
+        "Thay vào đó, trích dẫn bằng summary_evidence_ids hoặc evidence_ids "
+        "chính xác từ evidence. Mỗi nhận định phải có bằng chứng; trường "
+        "direction phải khớp với hướng do Python cung cấp. "
+        "Chỉ nêu rủi ro thống kê, không "
+        "khẳng định nguyên nhân hoặc quan hệ nhân quả. Phân biệt cảnh báo "
+        "với lỗi đã được xác nhận. Đề xuất các bước kiểm tra khả thi và "
+        "nêu giới hạn hoặc dữ liệu cần thu thập thêm. Không tham chiếu "
+        "kỳ hoặc số liệu không có trong dữ liệu.\n\n"
+        f"{json.dumps(context, ensure_ascii=False)}"
+    )
+    prompt += (
+        "\n\nQUY TẮC ĐỊNH DẠNG JSON BẮT BUỘC:\n"
+        "1. Chỉ trả về một JSON object hợp lệ.\n"
+        "2. Không bọc kết quả trong một object cấp cao hơn.\n"
+        "3. Không tạo các nhóm bao ngoài như "
+        '"bao_cao_phan_tich", "canh_bao_va_loi", '
+        'hoặc "de_xuat_va_gioi_han".\n'
+        "4. Phải sử dụng chính xác các khóa cấp cao nhất sau: "
+        "summary, summary_evidence_ids, trend_interpretation, "
+        "risk_areas, recommended_actions, limitations.\n"
+        "5. Các khóa và giá trị enum phải tuân thủ cấu trúc đã yêu cầu. "
+        "Nội dung diễn giải có thể bằng tiếng Việt.\n"
+        "6. Không thêm khóa ngoài cấu trúc đã yêu cầu."
+    )
+    prompt += (
+        "\n\nCẤU TRÚC CHI TIẾT CỦA CÁC OBJECT:\n"
+        "- trend_interpretation là danh sách object. Mỗi object phải có "
+        "metric, direction, observation, evidence_ids; không được bỏ "
+        "observation.\n"
+        "- risk_areas là danh sách object. Mỗi object phải có area, "
+        "priority, reason, evidence_ids. area chỉ nhận một trong các giá "
+        "trị production_stability, quality, downtime, data_quality. "
+        "Không dùng khóa type hoặc description.\n"
+        "- recommended_actions là danh sách object, mỗi object có action, "
+        "purpose, priority, evidence_ids; không trả về chuỗi đơn thuần.\n"
+        "- summary_evidence_ids phải là danh sách ID bằng chứng.\n"
+        "- limitations phải là danh sách chuỗi.\n"
+        "- Các danh sách và object phải tuân thủ đúng schema.\n"
+        "- Mỗi evidence_ids phải tham chiếu ID tồn tại trong evidence.\n"
+        "- Không tự tạo số liệu hoặc ID bằng chứng."
+    )
+    response = call_gemini_with_retry(
+        lambda: get_client().models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json",
+                "response_json_schema": _gemini_response_schema(
+                    HardwareTrendAnalysis
+                ),
+            },
+        )
+    )
+
+    response_text = response.text
+    if not response_text or not response_text.strip():
+        raise ValueError("Gemini trả về nội dung rỗng.")
+
+    logger.info("Gemini hardware trend response: %s", response_text)
+    try:
+        analysis = HardwareTrendAnalysis.model_validate_json(response_text)
+        _validate_hardware_trend_analysis(analysis, evidence, report)
+    except Exception:
+        logger.exception(
+            "Hardware trend validation failed. Response: %s",
+            response_text,
+        )
+        logger.error(
+            "Hardware trend schema: %s",
+            json.dumps(
+                _gemini_response_schema(HardwareTrendAnalysis),
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+        raise
+
+    return {
+        "title": "Phân tích xu hướng sản xuất",
+        **analysis.model_dump(mode="json"),
+        "evidence": evidence,
+    }
