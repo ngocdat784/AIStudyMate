@@ -1,7 +1,9 @@
 import unittest
 from datetime import datetime
 from typing import Iterator
+from unittest.mock import patch
 
+import pandas as pd
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -12,6 +14,7 @@ from app.database.connection import get_db
 from app.main import app
 from app.models import AnalysisHistory
 from app.services.analysis_history_service import create_analysis_history
+from app.services.multi_file_service import store_merged_hardware_dataset
 
 
 class AnalysisHistoryModelTests(unittest.TestCase):
@@ -163,6 +166,162 @@ class AnalysisHistoryAPITests(unittest.TestCase):
             with self.subTest(params=params):
                 response = self.client.get("/api/history", params=params)
                 self.assertEqual(response.status_code, 422)
+
+    def test_hardware_analyze_saves_history_without_changing_response(self):
+        analysis_result = {
+            "title": "Hardware analysis",
+            "summary": "Analysis summary.",
+            "data_quality": {"quality_score": 95},
+            "daily_production": [{"date": "2026-10-01", "production": 100}],
+        }
+
+        with patch(
+            "app.routes.hardware.analyze_hardware_dataframe",
+            return_value=analysis_result,
+        ):
+            response = self.client.post(
+                "/api/hardware/analyze",
+                files={
+                    "file": (
+                        "production.csv",
+                        b"Model,Production\nA,100\n",
+                        "text/csv",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), analysis_result)
+        with Session(self.engine) as session:
+            history = session.scalar(select(AnalysisHistory))
+            self.assertIsNotNone(history)
+            assert history is not None
+            self.assertEqual(history.analysis_type, "hardware_analysis")
+            self.assertEqual(history.source_filename, "production.csv")
+            self.assertEqual(history.summary, "Analysis summary.")
+            self.assertEqual(history.result_data, analysis_result)
+
+    def test_hardware_compare_saves_result_with_ai_status(self):
+        comparison_result = {
+            "summary": "Comparison summary.",
+            "models": {"model_a": "A", "model_b": "B"},
+        }
+        ai_result = {"summary": "AI comparison."}
+
+        with (
+            patch(
+                "app.routes.hardware.compare_hardware_models",
+                return_value=comparison_result.copy(),
+            ),
+            patch(
+                "app.routes.hardware.analyze_hardware_comparison",
+                return_value=ai_result,
+            ),
+        ):
+            response = self.client.post(
+                "/api/hardware/compare",
+                data={"model_a": "A", "model_b": "B"},
+                files={
+                    "file": (
+                        "models.csv",
+                        b"Model,Production\nA,100\nB,90\n",
+                        "text/csv",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ai_analysis"], ai_result)
+        self.assertEqual(response.json()["ai_status"], "available")
+        with Session(self.engine) as session:
+            history = session.scalar(select(AnalysisHistory))
+            self.assertIsNotNone(history)
+            assert history is not None
+            self.assertEqual(history.analysis_type, "hardware_comparison")
+            self.assertEqual(history.title, "So sánh phần cứng: A và B")
+            self.assertEqual(history.result_data["ai_status"], "available")
+
+    def test_hardware_trend_saves_history_and_dataset_id(self):
+        dataset_id = store_merged_hardware_dataset(
+            pd.DataFrame(
+                {
+                    "Date": ["2026-10-01"],
+                    "Production": [100],
+                    "Defects": [2],
+                }
+            )
+        )
+        trend_result = {
+            "summary": {"totals": {"production": 100}},
+            "time_series": [{"period_start": "2026-10-01"}],
+        }
+        ai_result = {"summary": "Trend analysis."}
+
+        with (
+            patch(
+                "app.routes.hardware.analyze_hardware_trends",
+                return_value=trend_result.copy(),
+            ),
+            patch(
+                "app.routes.hardware.analyze_hardware_trends_with_ai",
+                return_value=ai_result,
+            ),
+        ):
+            response = self.client.post(
+                "/api/hardware/trends",
+                json={"dataset_id": dataset_id, "granularity": "day"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ai_status"], "available")
+        with Session(self.engine) as session:
+            history = session.scalar(select(AnalysisHistory))
+            self.assertIsNotNone(history)
+            assert history is not None
+            self.assertEqual(history.analysis_type, "hardware_trends")
+            self.assertEqual(history.dataset_id, dataset_id)
+            self.assertEqual(history.result_data["ai_analysis"], ai_result)
+
+    def test_failed_history_save_does_not_fail_successful_analysis(self):
+        analysis_result = {
+            "title": "Hardware analysis",
+            "summary": "Analysis summary.",
+            "data_quality": {"quality_score": 95},
+        }
+
+        with (
+            patch(
+                "app.routes.hardware.analyze_hardware_dataframe",
+                return_value=analysis_result,
+            ),
+            patch(
+                "app.routes.hardware.create_analysis_history",
+                side_effect=RuntimeError("database unavailable"),
+            ),
+            self.assertLogs(
+                "app.routes.hardware",
+                level="ERROR",
+            ) as captured_logs,
+        ):
+            response = self.client.post(
+                "/api/hardware/analyze",
+                files={
+                    "file": (
+                        "production.csv",
+                        b"Model,Production\nA,100\n",
+                        "text/csv",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), analysis_result)
+        self.assertTrue(
+            any(
+                "Could not save hardware analysis history" in message
+                for message in captured_logs.output
+            )
+        )
 
 
 if __name__ == "__main__":

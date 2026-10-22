@@ -6,9 +6,11 @@ from datetime import date, datetime
 from typing import Any, Literal
 
 import pandas as pd
+from fastapi.encoders import jsonable_encoder
 from fastapi import (
     APIRouter,
     Body,
+    Depends,
     File,
     Form,
     HTTPException,
@@ -17,7 +19,10 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy.orm import Session
 
+from app.database.connection import get_db
+from app.services.analysis_history_service import create_analysis_history
 from app.services.hardware_ai_service import (
     analyze_hardware_comparison,
     analyze_hardware_trends_with_ai,
@@ -268,13 +273,55 @@ async def _read_hardware_upload(file: UploadFile) -> pd.DataFrame:
     return dataframe
 
 
+def _save_hardware_history_safely(
+    db: Session,
+    *,
+    analysis_type: str,
+    title: str,
+    result_data: dict[str, Any],
+    source_filename: str | None = None,
+    dataset_id: str | None = None,
+) -> None:
+    """Save analysis history without breaking a successful analysis response."""
+    try:
+        encoded_result = jsonable_encoder(result_data)
+        summary_value = encoded_result.get("summary")
+        summary = (
+            summary_value
+            if isinstance(summary_value, str)
+            else None
+        )
+        create_analysis_history(
+            db,
+            analysis_type=analysis_type,
+            title=title,
+            summary=summary,
+            source_filename=source_filename,
+            dataset_id=dataset_id,
+            result_data=encoded_result,
+        )
+    except Exception:
+        logger.exception(
+            "Could not save hardware analysis history: %s",
+            analysis_type,
+        )
+
+
 @router.post("/analyze")
 async def analyze_hardware(
     file: UploadFile = File(...),
+    db: Session = Depends(get_db),
 ):
     try:
         dataframe = await _read_hardware_upload(file)
         response = analyze_hardware_dataframe(dataframe)
+        _save_hardware_history_safely(
+            db,
+            analysis_type="hardware_analysis",
+            title="Phân tích dữ liệu phần cứng",
+            source_filename=file.filename,
+            result_data=response,
+        )
         return {
             **response,
             "data_quality": response["data_quality"],
@@ -294,6 +341,7 @@ async def compare_hardware(
     file: UploadFile = File(...),
     model_a: str = Form(...),
     model_b: str = Form(...),
+    db: Session = Depends(get_db),
 ):
     try:
         dataframe = await _read_hardware_upload(file)
@@ -320,6 +368,13 @@ async def compare_hardware(
             comparison["ai_status"] = "unavailable"
             comparison["ai_error"] = AI_UNAVAILABLE_MESSAGE
 
+        _save_hardware_history_safely(
+            db,
+            analysis_type="hardware_comparison",
+            title=f"So sánh phần cứng: {model_a} và {model_b}",
+            source_filename=file.filename,
+            result_data=comparison,
+        )
         return comparison
     except HTTPException:
         raise
@@ -509,7 +564,10 @@ async def analyze_hardware_multiple(
 
 
 @router.post("/trends")
-async def analyze_hardware_trend(request: HardwareTrendRequest):
+async def analyze_hardware_trend(
+    request: HardwareTrendRequest,
+    db: Session = Depends(get_db),
+):
     dataframe = get_merged_hardware_dataset(request.dataset_id)
     if dataframe is None:
         raise HTTPException(
@@ -550,4 +608,11 @@ async def analyze_hardware_trend(request: HardwareTrendRequest):
         result["ai_status"] = "unavailable"
         result["ai_error"] = TREND_AI_UNAVAILABLE_MESSAGE
 
+    _save_hardware_history_safely(
+        db,
+        analysis_type="hardware_trends",
+        title="Phân tích xu hướng phần cứng",
+        dataset_id=request.dataset_id,
+        result_data=result,
+    )
     return result

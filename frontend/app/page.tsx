@@ -7,6 +7,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import Link from "next/link";
 
 type KPI = {
   name: string;
@@ -1171,12 +1172,14 @@ export default function Home() {
 
           </div>
 
-          <div className="system-status">
-
-            <span className="status-dot" />
-
-            Gemini AI
-
+          <div className="dashboard-topbar-actions">
+            <Link className="history-nav-link" href="/history">
+              Lịch sử phân tích
+            </Link>
+            <div className="system-status">
+              <span className="status-dot" />
+              Gemini AI
+            </div>
           </div>
 
         </header>

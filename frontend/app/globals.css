@@ -113,6 +113,24 @@ button {
   font-size: 13px;
 }
 
+.dashboard-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.history-nav-link {
+  color: #555;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.history-nav-link:hover {
+  color: #171717;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
