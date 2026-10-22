@@ -1,4 +1,35 @@
+
+# Python
 venv/
-.env
+.venv/
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/
+
+# Test and coverage
+.coverage
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+
+# Temporary files
+*.tmp
+*.bak

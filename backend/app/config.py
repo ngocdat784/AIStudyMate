@@ -1,9 +1,16 @@
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # Gemini
     GEMINI_API_KEY: str | None = None
+
+    # PostgreSQL
+    DATABASE_URL: str | None = None
+
+    # Data Quality
     HARDWARE_DATA_QUALITY_MIN_SCORE: float | None = Field(
         default=None,
         ge=0,
@@ -13,6 +20,8 @@ class Settings(BaseSettings):
             "trigger high priority for data-cleanup actions."
         ),
     )
+
+    # Quality target
     HARDWARE_DEFECT_RATE_TARGET: float | None = Field(
         default=None,
         ge=0,
@@ -21,6 +30,8 @@ class Settings(BaseSettings):
             "triggers high priority for relevant quality actions."
         ),
     )
+
+    # Downtime target
     HARDWARE_DOWNTIME_TARGET_MINUTES: float | None = Field(
         default=None,
         ge=0,
