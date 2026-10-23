@@ -31,6 +31,10 @@ from app.services.hardware_service import (
     analyze_hardware_dataframe,
     compare_hardware_models,
 )
+from app.services.hardware_comparison_service import (
+    ComparisonDimension,
+    compare_hardware_periods,
+)
 from app.services.hardware_report_service import (
     build_hardware_pdf,
     build_hardware_xlsx,
@@ -380,6 +384,52 @@ async def compare_hardware(
         raise
     except Exception as error:
         logger.exception("Hardware comparison failed")
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        ) from error
+
+
+@router.post("/compare-periods")
+async def compare_hardware_periods_endpoint(
+    file: UploadFile = File(...),
+    period_a_start: date = Form(...),
+    period_a_end: date = Form(...),
+    period_b_start: date = Form(...),
+    period_b_end: date = Form(...),
+    dimension: ComparisonDimension | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
+    try:
+        dataframe = await _read_hardware_upload(file)
+        try:
+            comparison = compare_hardware_periods(
+                dataframe,
+                period_a_start=period_a_start,
+                period_a_end=period_a_end,
+                period_b_start=period_b_start,
+                period_b_end=period_b_end,
+                dimension=dimension,
+            )
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail=str(error),
+            ) from error
+
+        dimension_label = f" theo {dimension}" if dimension else ""
+        _save_hardware_history_safely(
+            db,
+            analysis_type="hardware_period_comparison",
+            title=f"So sánh hai khoảng thời gian{dimension_label}",
+            source_filename=file.filename,
+            result_data=comparison,
+        )
+        return comparison
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("Hardware period comparison failed")
         raise HTTPException(
             status_code=500,
             detail=str(error),
