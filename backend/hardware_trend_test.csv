@@ -1,0 +1,5 @@
+﻿Date,Production,Defects,Downtime,Model,Supplier,Batch
+2026-10-01,100,2,5,MB-PRO-X1,Supplier-A,BATCH-01
+2026-10-02,100,4,5,MB-PRO-X1,Supplier-A,BATCH-01
+2026-10-03,100,6,5,MB-PRO-X1,Supplier-A,BATCH-01
+2026-10-04,100,8,5,MB-PRO-X1,Supplier-A,BATCH-01

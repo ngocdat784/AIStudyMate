@@ -6,7 +6,10 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.services.hardware_trend_service import analyze_hardware_trends
+from app.services.hardware_trend_service import (
+    _build_consecutive_defect_rate_alerts,
+    analyze_hardware_trends,
+)
 from app.services.multi_file_service import (
     get_merged_hardware_dataset,
     store_merged_hardware_dataset,
@@ -14,6 +17,79 @@ from app.services.multi_file_service import (
 
 
 class HardwareTrendServiceTests(unittest.TestCase):
+    def test_consecutive_defect_rate_alerts_cover_overall_and_dimensions(self):
+        dataframe = pd.DataFrame(
+            {
+                "Date": [
+                    "2026-10-01",
+                    "2026-10-02",
+                    "2026-10-03",
+                    "2026-10-04",
+                ],
+                "Model": ["Model A"] * 4,
+                "Supplier": ["Supplier X"] * 4,
+                "Batch": ["Batch 1"] * 4,
+                "Production": [100] * 4,
+                "Defects": [1, 2, 3, 4],
+            }
+        )
+
+        result = analyze_hardware_trends(dataframe, "day")
+        alerts = result["consecutive_defect_rate_alerts"]
+
+        self.assertEqual(len(alerts), 4)
+        self.assertEqual(
+            {alert["scope"] for alert in alerts},
+            {"overall", "dimension"},
+        )
+        self.assertEqual(
+            {
+                alert["dimension"]
+                for alert in alerts
+                if alert["scope"] == "dimension"
+            },
+            {"Model", "Supplier", "Batch"},
+        )
+        for alert in alerts:
+            self.assertEqual(
+                alert["type"],
+                "consecutive_defect_rate_increase",
+            )
+            self.assertEqual(alert["consecutive_increases"], 3)
+            self.assertEqual(alert["start_period"], "2026-10-01")
+            self.assertEqual(alert["end_period"], "2026-10-04")
+            self.assertEqual(alert["total_increase_percentage_points"], 3)
+        self.assertEqual(
+            result["consecutive_alert_thresholds"],
+            {
+                "minimum_consecutive_increases": 3,
+                "periods_must_be_contiguous": True,
+                "missing_or_invalid_rate_breaks_streak": True,
+            },
+        )
+        self.assertTrue(result["anomalies"])
+
+    def test_consecutive_defect_rate_alerts_break_on_invalid_rates_and_gaps(self):
+        time_series = [
+            {"period_start": "2026-10-01", "defect_rate": 1.0},
+            {"period_start": "2026-10-02", "defect_rate": 2.0},
+            {"period_start": "2026-10-03", "defect_rate": None},
+            {"period_start": "2026-10-04", "defect_rate": 3.0},
+            {"period_start": "2026-10-05", "defect_rate": 4.0},
+            {"period_start": "2026-10-06", "defect_rate": 5.0},
+            {"period_start": "2026-10-07", "defect_rate": 6.0},
+            {"period_start": "2026-10-09", "defect_rate": 7.0},
+            {"period_start": "2026-10-10", "defect_rate": 8.0},
+            {"period_start": "2026-10-11", "defect_rate": 9.0},
+        ]
+
+        alerts = _build_consecutive_defect_rate_alerts(time_series, "day")
+
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["start_period"], "2026-10-04")
+        self.assertEqual(alerts[0]["end_period"], "2026-10-07")
+        self.assertEqual(alerts[0]["consecutive_increases"], 3)
+
     def test_daily_totals_changes_and_rate_points(self):
         dataframe = pd.DataFrame(
             {

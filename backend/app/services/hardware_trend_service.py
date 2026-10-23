@@ -15,6 +15,7 @@ PRODUCTION_DROP_THRESHOLD_PERCENT = 20.0
 DEFECT_INCREASE_THRESHOLD_PERCENT = 20.0
 DOWNTIME_INCREASE_THRESHOLD_PERCENT = 20.0
 DEFECT_RATE_INCREASE_THRESHOLD_POINTS = 0.5
+MIN_CONSECUTIVE_DEFECT_RATE_INCREASES = 3
 MAX_DIMENSION_TREND_GROUPS = 10
 TREND_DIMENSIONS = ("Model", "Supplier", "Batch")
 
@@ -307,6 +308,74 @@ def _build_anomalies(
     return anomalies
 
 
+def _build_consecutive_defect_rate_alerts(
+    time_series: list[dict[str, Any]],
+    granularity: Granularity,
+    *,
+    scope: str = "overall",
+    dimension: str | None = None,
+    entity: str | None = None,
+) -> list[dict[str, Any]]:
+    """Detect sustained increases in defect rate across contiguous periods."""
+    alerts: list[dict[str, Any]] = []
+    streak: list[dict[str, Any]] = []
+
+    def flush_streak() -> None:
+        if len(streak) - 1 < MIN_CONSECUTIVE_DEFECT_RATE_INCREASES:
+            return
+        first = streak[0]
+        last = streak[-1]
+        first_rate = first["defect_rate"]
+        last_rate = last["defect_rate"]
+        alerts.append(
+            {
+                "type": "consecutive_defect_rate_increase",
+                "severity": "warning",
+                "scope": scope,
+                "dimension": dimension,
+                "entity": entity,
+                "start_period": first["period_start"],
+                "end_period": last["period_start"],
+                "consecutive_increases": len(streak) - 1,
+                "first_defect_rate": first_rate,
+                "last_defect_rate": last_rate,
+                "total_increase_percentage_points": round(
+                    last_rate - first_rate,
+                    2,
+                ),
+            }
+        )
+
+    for point in time_series:
+        rate = point["defect_rate"]
+        if rate is None:
+            flush_streak()
+            streak.clear()
+            continue
+
+        if not streak:
+            streak.append(point)
+            continue
+
+        previous = streak[-1]
+        previous_start = date.fromisoformat(previous["period_start"])
+        current_start = date.fromisoformat(point["period_start"])
+        periods_between = (
+            _period_ordinal(current_start, granularity)
+            - _period_ordinal(previous_start, granularity)
+        )
+        if periods_between == 1 and rate > previous["defect_rate"]:
+            streak.append(point)
+            continue
+
+        flush_streak()
+        streak.clear()
+        streak.append(point)
+
+    flush_streak()
+    return alerts
+
+
 def analyze_hardware_trends(
     dataframe: pd.DataFrame,
     granularity: Granularity,
@@ -456,6 +525,23 @@ def analyze_hardware_trends(
             ],
         }
 
+    consecutive_defect_rate_alerts = _build_consecutive_defect_rate_alerts(
+        time_series,
+        granularity,
+        scope="overall",
+    )
+    for dimension, trend_data in dimension_trends.items():
+        for group in trend_data["groups"]:
+            consecutive_defect_rate_alerts.extend(
+                _build_consecutive_defect_rate_alerts(
+                    group["time_series"],
+                    granularity,
+                    scope="dimension",
+                    dimension=dimension,
+                    entity=group["name"],
+                )
+            )
+
     valid_production = [
         row for rows in grouped_rows.values() for row in rows
         if row["production_issue"] is None
@@ -589,6 +675,14 @@ def analyze_hardware_trends(
         "period_changes": period_changes,
         "dimension_trends": dimension_trends,
         "anomalies": anomalies,
+        "consecutive_defect_rate_alerts": consecutive_defect_rate_alerts,
+        "consecutive_alert_thresholds": {
+            "minimum_consecutive_increases": (
+                MIN_CONSECUTIVE_DEFECT_RATE_INCREASES
+            ),
+            "periods_must_be_contiguous": True,
+            "missing_or_invalid_rate_breaks_streak": True,
+        },
         "anomaly_thresholds": {
             "production_drop_percent": PRODUCTION_DROP_THRESHOLD_PERCENT,
             "defects_increase_percent": DEFECT_INCREASE_THRESHOLD_PERCENT,
