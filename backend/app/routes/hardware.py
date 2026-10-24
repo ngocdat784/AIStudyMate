@@ -25,6 +25,7 @@ from app.database.connection import get_db
 from app.services.analysis_history_service import create_analysis_history
 from app.services.hardware_ai_service import (
     analyze_hardware_comparison,
+    explain_hardware_intervention,
     analyze_hardware_trends_with_ai,
 )
 from app.services.hardware_service import (
@@ -49,6 +50,9 @@ from app.services.multi_file_service import (
 from app.services.hardware_trend_service import (
     Granularity,
     analyze_hardware_trends,
+)
+from app.services.hardware_intervention_service import (
+    evaluate_hardware_intervention,
 )
 
 
@@ -77,6 +81,17 @@ class HardwareTrendRequest(BaseModel):
     granularity: Granularity
     start_date: date | None = None
     end_date: date | None = None
+
+
+class HardwareInterventionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dataset_id: str
+    before_start_date: date
+    before_end_date: date
+    after_start_date: date
+    after_end_date: date
+    model: str | None = None
 
 
 def _json_safe_cell(value: Any) -> Any:
@@ -662,6 +677,54 @@ async def analyze_hardware_trend(
         db,
         analysis_type="hardware_trends",
         title="Phân tích xu hướng phần cứng",
+        dataset_id=request.dataset_id,
+        result_data=result,
+    )
+    return result
+
+
+@router.post("/evaluate-intervention")
+def evaluate_hardware_intervention_endpoint(
+    request: HardwareInterventionRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    dataframe = get_merged_hardware_dataset(request.dataset_id)
+    if dataframe is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Không tìm thấy dataset hoặc dataset đã hết hạn. "
+                "Vui lòng gộp lại các file để nhận dataset_id mới."
+            ),
+        )
+
+    try:
+        result = evaluate_hardware_intervention(
+            dataframe,
+            before_start_date=request.before_start_date,
+            before_end_date=request.before_end_date,
+            after_start_date=request.after_start_date,
+            after_end_date=request.after_end_date,
+            model=request.model,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=str(error),
+        ) from error
+
+    try:
+        result["ai_explanation"] = explain_hardware_intervention(result)
+        result["ai_status"] = "available"
+    except Exception:
+        logger.exception("Hardware intervention AI explanation failed")
+        result["ai_status"] = "unavailable"
+        result["ai_error"] = AI_UNAVAILABLE_MESSAGE
+
+    _save_hardware_history_safely(
+        db,
+        analysis_type="hardware_intervention",
+        title="Đánh giá hiệu quả can thiệp sản xuất",
         dataset_id=request.dataset_id,
         result_data=result,
     )

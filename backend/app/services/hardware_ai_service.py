@@ -1686,6 +1686,47 @@ def analyze_hardware_comparison(
     return analysis.model_dump()
 
 
+def explain_hardware_intervention(
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    prompt = (
+        "Bạn là chuyên gia phân tích chất lượng sản xuất phần cứng. "
+        "Diễn giải ngắn gọn bằng tiếng Việt kết quả đánh giá can thiệp "
+        "đã được tính hoàn toàn bằng Python bên dưới. Không tính lại, "
+        "sửa hoặc thêm KPI; không khẳng định quan hệ nhân quả hoặc thành "
+        "công khi conclusion không phải improved. Nêu rõ giới hạn dữ liệu "
+        "và mọi đánh đổi giữa tỷ lệ lỗi, sản lượng/ngày và downtime/ngày. "
+        "Chỉ trả về summary và các điểm cần kiểm tra tiếp theo.\n\n"
+        f"{json.dumps(result, ensure_ascii=False)}"
+    )
+    response = call_gemini_with_retry(
+        lambda: get_client().models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json",
+                "response_schema": _gemini_response_schema(
+                    HardwareComparisonAnalysis
+                ),
+                "temperature": 0.2,
+            },
+        )
+    )
+
+    response_text = getattr(response, "text", None)
+    if not response_text or not response_text.strip():
+        raise ValueError("Gemini không trả về diễn giải can thiệp.")
+    try:
+        analysis = HardwareComparisonAnalysis.model_validate_json(
+            response_text
+        )
+    except Exception as exc:
+        raise ValueError(
+            "Không thể xác thực diễn giải can thiệp từ Gemini."
+        ) from exc
+    return analysis.model_dump()
+
+
 def _build_hardware_trend_evidence(
     report: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
