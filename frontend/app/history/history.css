@@ -508,6 +508,69 @@
   line-height: 1.7;
 }
 
+.history-intervention-conclusion {
+  display: inline-flex;
+  padding: 7px 10px;
+  border: 1px solid #d9e8df;
+  background: #f1f8f3;
+  color: #34764d;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.history-intervention-mixed_result,
+.history-intervention-not_improved,
+.history-intervention-insufficient_data {
+  border-color: #eadfc9;
+  background: #fff9ed;
+  color: #8a6420;
+}
+
+.history-intervention-summary {
+  margin: 10px 0;
+  color: #555;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.history-result-section > small {
+  color: #888;
+  font-size: 9px;
+}
+
+.history-intervention-period-grid,
+.history-intervention-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.history-intervention-period,
+.history-intervention-metric {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e5e4df;
+  background: #fff;
+  color: #666;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.history-intervention-period strong,
+.history-intervention-metric strong {
+  color: #333;
+  font-size: 11px;
+}
+
+.history-intervention-period small,
+.history-intervention-metric small {
+  color: #888;
+  font-size: 9px;
+  line-height: 1.6;
+}
+
 .history-detail-result {
   display: grid;
   gap: 12px;
@@ -622,6 +685,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .history-intervention-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .history-table {
     min-width: 850px;
   }
@@ -690,6 +757,11 @@
   }
 
   .history-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .history-intervention-period-grid,
+  .history-intervention-metric-grid {
     grid-template-columns: 1fr;
   }
 

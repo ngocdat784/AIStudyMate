@@ -41,7 +41,8 @@ type HistoryTypeFilter =
   | ""
   | "hardware_analysis"
   | "hardware_comparison"
-  | "hardware_trends";
+  | "hardware_trends"
+  | "hardware_intervention";
 
 async function getApiError(response: Response): Promise<string> {
   const responseText = await response.text();
@@ -74,6 +75,8 @@ function analysisTypeLabel(type: string): string {
       return "So sánh model";
     case "hardware_trends":
       return "Phân tích xu hướng";
+    case "hardware_intervention":
+      return "Đánh giá can thiệp";
     default:
       return type;
   }
@@ -101,6 +104,14 @@ function asRecords(value: unknown): Record<string, unknown>[] {
     (item): item is Record<string, unknown> =>
       typeof item === "object" && item !== null && !Array.isArray(item)
   );
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function asStrings(value: unknown): string[] {
@@ -138,8 +149,215 @@ function ResultSection({
   );
 }
 
+function HistoryInterventionResult({
+  result,
+}: {
+  result: Record<string, unknown>;
+}) {
+  const metrics = asRecord(result.metrics) ?? {};
+  const periods = asRecord(result.periods) ?? {};
+  const dataQuality = asRecord(result.data_quality) ?? {};
+  const before = asRecord(periods.before);
+  const after = asRecord(periods.after);
+  const aiExplanation = asRecord(result.ai_explanation);
+  const conclusion = result.conclusion;
+  const conclusionLabel =
+    conclusion === "improved"
+      ? "Có dấu hiệu cải thiện"
+      : conclusion === "mixed_result"
+        ? "Kết quả hỗn hợp"
+        : conclusion === "not_improved"
+          ? "Chưa cải thiện"
+          : conclusion === "insufficient_data"
+            ? "Chưa đủ dữ liệu"
+            : displayValue(conclusion);
+  const warningList = asStrings(result.warnings);
+  const dataWarnings = asStrings(dataQuality.warnings);
+  const operationalWarnings = asStrings(result.operational_warnings);
+  const metricRows = [
+    ["Tỷ lệ lỗi", asRecord(metrics.defect_rate), true],
+    ["Số lỗi", asRecord(metrics.defects), false],
+    ["Tổng sản lượng", asRecord(metrics.production), false],
+    [
+      "Sản lượng mỗi ngày",
+      asRecord(asRecord(metrics.production)?.per_day),
+      false,
+    ],
+    ["Tổng downtime", asRecord(metrics.downtime), false],
+    [
+      "Downtime mỗi ngày",
+      asRecord(asRecord(metrics.downtime)?.per_day),
+      false,
+    ],
+  ] as const;
+
+  return (
+    <div className="history-detail-result">
+      <ResultSection title="Kết luận">
+        <div
+          className={`history-intervention-conclusion history-intervention-${String(
+            conclusion ?? "unknown"
+          )}`}
+        >
+          {conclusionLabel}
+        </div>
+        <p className="history-intervention-summary">
+          {displayValue(result.summary)}
+        </p>
+        <small>
+          Mã kết luận: {displayValue(result.conclusion_reason)} · Chất lượng dữ
+          liệu:{" "}
+          {dataQuality.status === "complete"
+            ? "Đầy đủ"
+            : dataQuality.status === "partial"
+              ? "Một phần"
+              : "—"}
+        </small>
+      </ResultSection>
+
+      {(before || after) && (
+        <ResultSection title="Các kỳ được so sánh">
+          <div className="history-intervention-period-grid">
+            {(
+              [
+                ["Trước can thiệp", before],
+                ["Sau can thiệp", after],
+              ] as const
+            ).map(
+              ([label, period]) =>
+                period && (
+                  <article
+                    className="history-intervention-period"
+                    key={label}
+                  >
+                    <strong>{label}</strong>
+                    <span>
+                      {displayValue(period.start_date)} —{" "}
+                      {displayValue(period.end_date)}
+                    </span>
+                    <small>
+                      {displayValue(period.days)} ngày ·{" "}
+                      {displayValue(period.rows_in_range)} bản ghi
+                    </small>
+                  </article>
+                )
+            )}
+          </div>
+        </ResultSection>
+      )}
+
+      <ResultSection title="So sánh KPI">
+        <div className="history-intervention-metric-grid">
+          {metricRows.map(([label, metric, isRate]) => {
+            if (!metric) {
+              return null;
+            }
+            const change = isRate
+              ? metric.change_absolute_percentage_points
+              : metric.change_absolute;
+            const unit = isRate ? "điểm %" : metric.unit;
+            return (
+              <article className="history-intervention-metric" key={label}>
+                <strong>{label}</strong>
+                <span>
+                  Trước: {displayValue(metric.before)}{" "}
+                  {isRate ? "%" : displayValue(metric.unit)}
+                </span>
+                <span>
+                  Sau: {displayValue(metric.after)}{" "}
+                  {isRate ? "%" : displayValue(metric.unit)}
+                </span>
+                <small>
+                  Chênh lệch: {displayValue(change)} {displayValue(unit)}
+                  {" · "}
+                  {metric.change_percent === null ||
+                  metric.change_percent === undefined
+                    ? "—"
+                    : `${displayValue(metric.change_percent)}%`}
+                </small>
+              </article>
+            );
+          })}
+        </div>
+      </ResultSection>
+
+      {(dataWarnings.length > 0 ||
+        operationalWarnings.length > 0 ||
+        warningList.length > 0) && (
+        <ResultSection title="Cảnh báo">
+          {dataWarnings.length > 0 && (
+            <>
+              <strong>Cảnh báo dữ liệu</strong>
+              <ul className="history-bullet-list">
+                {dataWarnings.map((warning, index) => (
+                  <li key={`data-${index}-${warning}`}>{warning}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {operationalWarnings.length > 0 && (
+            <>
+              <strong>Cảnh báo vận hành</strong>
+              <ul className="history-bullet-list">
+                {operationalWarnings.map((warning, index) => (
+                  <li key={`ops-${index}-${warning}`}>{warning}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {dataWarnings.length === 0 &&
+            operationalWarnings.length === 0 &&
+            warningList.length > 0 && (
+              <ul className="history-bullet-list">
+                {warningList.map((warning, index) => (
+                  <li key={`warning-${index}-${warning}`}>{warning}</li>
+                ))}
+              </ul>
+            )}
+        </ResultSection>
+      )}
+
+      {aiExplanation && (
+        <ResultSection title="Diễn giải hỗ trợ từ Gemini">
+          <p className="history-intervention-summary">
+            {displayValue(aiExplanation.summary)}
+          </p>
+          {asStrings(aiExplanation.investigation_points).length > 0 && (
+            <ul className="history-bullet-list">
+              {asStrings(aiExplanation.investigation_points).map(
+                (point, index) => (
+                  <li key={`${index}-${point}`}>{point}</li>
+                )
+              )}
+            </ul>
+          )}
+        </ResultSection>
+      )}
+      {result.ai_status === "unavailable" && (
+        <ResultSection title="Diễn giải hỗ trợ từ Gemini">
+          <p className="history-intervention-summary">
+            {displayValue(result.ai_error)}
+          </p>
+          <small>
+            Các KPI và kết luận do Python tính vẫn có thể xem ở trên.
+          </small>
+        </ResultSection>
+      )}
+
+      <details className="history-raw-data">
+        <summary>Xem toàn bộ dữ liệu kết quả</summary>
+        <pre className="history-json">{JSON.stringify(result, null, 2)}</pre>
+      </details>
+    </div>
+  );
+}
+
 function HistoryResult({ detail }: { detail: HistoryDetail }) {
   const result = detail.result_data;
+  if (detail.analysis_type === "hardware_intervention") {
+    return <HistoryInterventionResult result={result} />;
+  }
+
   const kpis = asRecords(result.kpis);
   const insights = asStrings(result.insights);
   const warnings = asStrings(result.warnings);
@@ -425,6 +643,9 @@ export default function HistoryPage() {
                 </option>
                 <option value="hardware_comparison">So sánh model</option>
                 <option value="hardware_trends">Phân tích xu hướng</option>
+                <option value="hardware_intervention">
+                  Đánh giá can thiệp
+                </option>
               </select>
             </label>
             <div className="history-total">

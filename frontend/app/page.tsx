@@ -460,6 +460,257 @@ type HardwareTrendResult = {
   ai_error?: string;
 };
 
+type InterventionMetricComparison = {
+  before: number | null;
+  after: number | null;
+  change_absolute: number | null;
+  change_percent: number | null;
+  change_absolute_percentage_points?: number | null;
+  unit: string;
+};
+
+type HardwareInterventionResult = {
+  title: string;
+  summary: string;
+  conclusion:
+    | "improved"
+    | "not_improved"
+    | "mixed_result"
+    | "insufficient_data";
+  conclusion_reason: string;
+  model: string | null;
+  periods: {
+    before: {
+      start_date: string;
+      end_date: string;
+      days: number;
+      rows_in_range: number;
+      totals: {
+        production: number | null;
+        defects: number | null;
+        defect_rate: number | null;
+        downtime: number | null;
+      };
+    };
+    after: {
+      start_date: string;
+      end_date: string;
+      days: number;
+      rows_in_range: number;
+      totals: {
+        production: number | null;
+        defects: number | null;
+        defect_rate: number | null;
+        downtime: number | null;
+      };
+    };
+  };
+  metrics: {
+    production: InterventionMetricComparison & {
+      per_day: InterventionMetricComparison;
+    };
+    defects: InterventionMetricComparison;
+    defect_rate: InterventionMetricComparison;
+    downtime: InterventionMetricComparison & {
+      per_day: InterventionMetricComparison;
+    };
+  };
+  data_quality: {
+    status: "complete" | "partial";
+    warnings: string[];
+  };
+  warnings: string[];
+  operational_warnings: string[];
+  ai_explanation: {
+    summary: string;
+    investigation_points: string[];
+  } | null;
+  ai_status: "available" | "unavailable" | "not_requested";
+  ai_error?: string;
+};
+
+type InterventionMetricCardProps = {
+  label: string;
+  metric: InterventionMetricComparison;
+  percentPoints?: boolean;
+};
+
+function formatInterventionValue(
+  value: number | null,
+  unit: string
+): string {
+  if (value === null) {
+    return "Không đủ dữ liệu";
+  }
+  return `${value.toLocaleString("vi-VN", {
+    maximumFractionDigits: 2,
+  })} ${unit}`.trim();
+}
+
+function InterventionMetricCard({
+  label,
+  metric,
+  percentPoints = false,
+}: InterventionMetricCardProps) {
+  const change = percentPoints
+    ? metric.change_absolute_percentage_points
+    : metric.change_absolute;
+  const changeUnit = percentPoints ? "điểm %" : metric.unit;
+
+  return (
+    <article className="intervention-metric-card">
+      <strong>{label}</strong>
+      <div className="intervention-metric-values">
+        <span>
+          <small>Trước</small>
+          {formatInterventionValue(metric.before, metric.unit)}
+        </span>
+        <span>
+          <small>Sau</small>
+          {formatInterventionValue(metric.after, metric.unit)}
+        </span>
+      </div>
+      <div className="intervention-metric-change">
+        <span>
+          Thay đổi: {formatInterventionValue(change ?? null, changeUnit)}
+        </span>
+        <span>
+          {metric.change_percent === null
+            ? "Không tính được phần trăm"
+            : `${metric.change_percent > 0 ? "+" : ""}${metric.change_percent.toLocaleString(
+                "vi-VN",
+                { maximumFractionDigits: 2 }
+              )}%`}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+function HardwareInterventionDashboard({
+  result,
+}: {
+  result: HardwareInterventionResult;
+}) {
+  const conclusionLabels = {
+    improved: "Có dấu hiệu cải thiện",
+    not_improved: "Chưa cải thiện",
+    mixed_result: "Kết quả hỗn hợp",
+    insufficient_data: "Chưa đủ dữ liệu",
+  } as const;
+
+  return (
+    <section className="intervention-dashboard" aria-live="polite">
+      <div className="intervention-result-heading">
+        <div>
+          <span className="history-section-index">03 / EVALUATION</span>
+          <h3>{result.title}</h3>
+          <p>{result.summary}</p>
+        </div>
+        <span
+          className={`intervention-conclusion intervention-conclusion-${result.conclusion}`}
+        >
+          {conclusionLabels[result.conclusion]}
+        </span>
+      </div>
+
+      <div className="intervention-period-grid">
+        {(
+          [
+            ["Trước can thiệp", result.periods.before],
+            ["Sau can thiệp", result.periods.after],
+          ] as const
+        ).map(([label, period]) => (
+          <article className="intervention-period" key={label}>
+            <strong>{label}</strong>
+            <span>
+              {period.start_date} — {period.end_date} ({period.days} ngày)
+            </span>
+            <small>
+              {period.rows_in_range.toLocaleString("vi-VN")} bản ghi phù hợp
+            </small>
+          </article>
+        ))}
+      </div>
+
+      <div className="intervention-metric-grid">
+        <InterventionMetricCard
+          label="Tỷ lệ lỗi"
+          metric={result.metrics.defect_rate}
+          percentPoints
+        />
+        <InterventionMetricCard
+          label="Số lỗi"
+          metric={result.metrics.defects}
+        />
+        <InterventionMetricCard
+          label="Tổng sản lượng"
+          metric={result.metrics.production}
+        />
+        <InterventionMetricCard
+          label="Sản lượng mỗi ngày"
+          metric={result.metrics.production.per_day}
+        />
+        <InterventionMetricCard
+          label="Tổng downtime"
+          metric={result.metrics.downtime}
+        />
+        <InterventionMetricCard
+          label="Downtime mỗi ngày"
+          metric={result.metrics.downtime.per_day}
+        />
+      </div>
+
+      <div className="intervention-quality">
+        <strong>
+          Chất lượng dữ liệu:{" "}
+          {result.data_quality.status === "complete" ? "Đầy đủ" : "Một phần"}
+        </strong>
+        <span>Mã kết luận: {result.conclusion_reason}</span>
+        {result.data_quality.warnings.length > 0 && (
+          <ul>
+            {result.data_quality.warnings.map((warning, index) => (
+              <li key={`${index}-${warning}`}>{warning}</li>
+            ))}
+          </ul>
+        )}
+        {result.operational_warnings.length > 0 && (
+          <>
+            <strong>Biến động vận hành</strong>
+            <ul>
+              {result.operational_warnings.map((warning, index) => (
+                <li key={`${index}-${warning}`}>{warning}</li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+
+      {result.ai_explanation && (
+        <div className="intervention-ai">
+          <strong>Diễn giải hỗ trợ từ Gemini</strong>
+          <p>{result.ai_explanation.summary}</p>
+          {result.ai_explanation.investigation_points.length > 0 && (
+            <ul>
+              {result.ai_explanation.investigation_points.map(
+                (point, index) => (
+                  <li key={`${index}-${point}`}>{point}</li>
+                )
+              )}
+            </ul>
+          )}
+        </div>
+      )}
+      {result.ai_status === "unavailable" && (
+        <p className="intervention-ai-unavailable">
+          {result.ai_error ??
+            "Gemini hiện không khả dụng; các chỉ số và kết luận do Python tính vẫn được giữ nguyên."}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export default function Home() {
   const [selectedFile, setSelectedFile] =
     useState<File | null>(null);
@@ -523,6 +774,16 @@ export default function Home() {
 
   const [trendResult, setTrendResult] =
     useState<HardwareTrendResult | null>(null);
+
+  const [interventionBeforeStart, setInterventionBeforeStart] = useState("");
+  const [interventionBeforeEnd, setInterventionBeforeEnd] = useState("");
+  const [interventionAfterStart, setInterventionAfterStart] = useState("");
+  const [interventionAfterEnd, setInterventionAfterEnd] = useState("");
+  const [interventionModel, setInterventionModel] = useState("");
+  const [interventionLoading, setInterventionLoading] = useState(false);
+  const [interventionError, setInterventionError] = useState("");
+  const [interventionResult, setInterventionResult] =
+    useState<HardwareInterventionResult | null>(null);
 
   // --------------------------------
   // File
@@ -611,7 +872,9 @@ export default function Home() {
     setMultipleFiles(files);
     setMultipleResult(null);
     setTrendResult(null);
+    setInterventionResult(null);
     setTrendError("");
+    setInterventionError("");
     setMultipleError(
       files.length > 10
         ? "Chỉ hỗ trợ tối đa 10 file mỗi lần."
@@ -634,6 +897,8 @@ export default function Home() {
     setTrendError("");
     setMultipleResult(null);
     setTrendResult(null);
+    setInterventionError("");
+    setInterventionResult(null);
 
     try {
       const formData = new FormData();
@@ -737,6 +1002,99 @@ export default function Home() {
     }
   };
 
+  const handleEvaluateIntervention = async () => {
+    if (!multipleResult?.dataset_id) {
+      setInterventionError(
+        "Không có dataset hợp lệ để đánh giá. Hãy tải lên và gộp lại các file."
+      );
+      return;
+    }
+
+    if (
+      !interventionBeforeStart ||
+      !interventionBeforeEnd ||
+      !interventionAfterStart ||
+      !interventionAfterEnd
+    ) {
+      setInterventionError("Vui lòng chọn đầy đủ ngày cho cả hai khoảng.");
+      return;
+    }
+
+    if (interventionBeforeStart > interventionBeforeEnd) {
+      setInterventionError(
+        "Ngày bắt đầu kỳ trước phải nhỏ hơn hoặc bằng ngày kết thúc."
+      );
+      return;
+    }
+    if (interventionAfterStart > interventionAfterEnd) {
+      setInterventionError(
+        "Ngày bắt đầu kỳ sau phải nhỏ hơn hoặc bằng ngày kết thúc."
+      );
+      return;
+    }
+    if (interventionBeforeEnd >= interventionAfterStart) {
+      setInterventionError(
+        "Khoảng trước can thiệp phải kết thúc trước khoảng sau can thiệp."
+      );
+      return;
+    }
+
+    setInterventionLoading(true);
+    setInterventionError("");
+    setInterventionResult(null);
+
+    try {
+      const response = await fetch(
+        "http://127.0.0.1:8000/api/hardware/evaluate-intervention",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            dataset_id: multipleResult.dataset_id,
+            before_start_date: interventionBeforeStart,
+            before_end_date: interventionBeforeEnd,
+            after_start_date: interventionAfterStart,
+            after_end_date: interventionAfterEnd,
+            ...(interventionModel.trim()
+              ? { model: interventionModel.trim() }
+              : {}),
+          }),
+        }
+      );
+      const data: unknown = await response.json();
+
+      if (!response.ok) {
+        const detail =
+          typeof data === "object" &&
+          data !== null &&
+          "detail" in data &&
+          typeof data.detail === "string"
+            ? data.detail
+            : "Không thể đánh giá hiệu quả can thiệp.";
+        throw new Error(detail);
+      }
+
+      setInterventionResult(data as HardwareInterventionResult);
+      window.setTimeout(() => {
+        document.getElementById("hardware-intervention-result")?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 100);
+    } catch (error) {
+      console.error("Hardware intervention evaluation failed:", error);
+      setInterventionError(
+        error instanceof Error
+          ? error.message
+          : "Đã xảy ra lỗi khi đánh giá can thiệp."
+      );
+    } finally {
+      setInterventionLoading(false);
+    }
+  };
+
   const handleClearMultiple = () => {
     setMultipleFiles([]);
     setMultipleResult(null);
@@ -745,6 +1103,13 @@ export default function Home() {
     setTrendError("");
     setTrendStartDate("");
     setTrendEndDate("");
+    setInterventionBeforeStart("");
+    setInterventionBeforeEnd("");
+    setInterventionAfterStart("");
+    setInterventionAfterEnd("");
+    setInterventionModel("");
+    setInterventionResult(null);
+    setInterventionError("");
 
     const input = document.getElementById(
       "hardware-multiple-files"
@@ -1782,6 +2147,122 @@ export default function Home() {
             )}
 
             {trendResult && <HardwareTrendDashboard result={trendResult} />}
+
+            {multipleResult.dataset_id && (
+              <section className="dashboard-card intervention-controls-card">
+                <div className="dashboard-card-header">
+                  <div>
+                    <span>03</span>
+                    <h3>So sánh trước và sau can thiệp</h3>
+                  </div>
+                  <p>
+                    KPI và kết luận được tính bằng Python. Gemini chỉ hỗ trợ
+                    diễn giải; kết quả sẽ được lưu trong lịch sử phân tích.
+                  </p>
+                </div>
+
+                <div className="intervention-controls">
+                  <label>
+                    <span>Từ ngày trước can thiệp</span>
+                    <input
+                      type="date"
+                      value={interventionBeforeStart}
+                      onChange={(event) => {
+                        setInterventionBeforeStart(event.target.value);
+                        setInterventionResult(null);
+                      }}
+                      disabled={interventionLoading}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Đến ngày trước can thiệp</span>
+                    <input
+                      type="date"
+                      value={interventionBeforeEnd}
+                      onChange={(event) => {
+                        setInterventionBeforeEnd(event.target.value);
+                        setInterventionResult(null);
+                      }}
+                      disabled={interventionLoading}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Từ ngày sau can thiệp</span>
+                    <input
+                      type="date"
+                      value={interventionAfterStart}
+                      onChange={(event) => {
+                        setInterventionAfterStart(event.target.value);
+                        setInterventionResult(null);
+                      }}
+                      disabled={interventionLoading}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Đến ngày sau can thiệp</span>
+                    <input
+                      type="date"
+                      value={interventionAfterEnd}
+                      onChange={(event) => {
+                        setInterventionAfterEnd(event.target.value);
+                        setInterventionResult(null);
+                      }}
+                      disabled={interventionLoading}
+                      required
+                    />
+                  </label>
+                  <label className="intervention-model-field">
+                    <span>Model (không bắt buộc)</span>
+                    <input
+                      type="text"
+                      value={interventionModel}
+                      onChange={(event) => {
+                        setInterventionModel(event.target.value);
+                        setInterventionResult(null);
+                      }}
+                      placeholder="Ví dụ: MB-PRO-X1"
+                      disabled={interventionLoading}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="analyze-button trend-submit"
+                    onClick={handleEvaluateIntervention}
+                    disabled={interventionLoading}
+                  >
+                    {interventionLoading ? (
+                      <>
+                        <span className="spinner" />
+                        Đang đánh giá...
+                      </>
+                    ) : (
+                      <>Đánh giá can thiệp <span>→</span></>
+                    )}
+                  </button>
+                </div>
+
+                <p className="intervention-form-note">
+                  Hai khoảng ngày không được chồng lấn. Khi độ dài kỳ khác
+                  nhau, sản lượng và downtime mỗi ngày sẽ được dùng để so sánh
+                  tác động vận hành; tổng số lỗi vẫn được hiển thị riêng.
+                </p>
+                {interventionError && (
+                  <div className="error-box" role="alert">
+                    <strong>Không thể đánh giá</strong>
+                    <span>{interventionError}</span>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {interventionResult && (
+              <div id="hardware-intervention-result">
+                <HardwareInterventionDashboard result={interventionResult} />
+              </div>
+            )}
           </section>
         )}
 
