@@ -9,7 +9,7 @@ from app.config import settings
 from app.database.base import Base
 
 # Import model để đăng ký metadata với SQLAlchemy.
-from app.models import AnalysisHistory  # noqa: F401
+from app.models import AnalysisHistory, AIAuditLog  # noqa: F401
 
 
 config = context.config

@@ -5,6 +5,12 @@ import json
 import logging
 import math
 import re
+import time
+
+from app.services.ai_audit_service import (
+    start_ai_audit_log,
+    finish_ai_audit_log,
+)
 from datetime import date, datetime
 from typing import Any, Literal
 
@@ -13,6 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
 from app.services.gemini_retry import call_gemini_with_retry
+
+
 
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
@@ -1554,10 +1562,10 @@ def analyze_hardware_deep(
     """
     Tạo báo cáo phân tích chuyên sâu bằng Gemini.
 
-    Số liệu KPI lấy từ report do backend tính toán.
-    Gemini chỉ tạo phần diễn giải, nhận xét và đề xuất.
+    KPI do Python tính toán.
+    Gemini chỉ diễn giải, nhận xét và đề xuất.
+    Audit ghi nhận quá trình gọi AI và kiểm định kết quả.
     """
-
     if not isinstance(report, dict):
         raise TypeError(
             "report phải là dictionary chứa kết quả phân tích."
@@ -1569,74 +1577,144 @@ def analyze_hardware_deep(
     )
     prompt = _build_prompt(context)
 
-    response = call_gemini_with_retry(
-        lambda: get_client().models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": _gemini_response_schema(DeepAIAnalysis),
-                "temperature": 0.2,
-            },
-        )
+    audit_id = start_ai_audit_log(
+        analysis_type="hardware_analysis",
+        model_name=GEMINI_MODEL,
+        prompt_version="hardware_deep_v1",
+        input_data={
+            "report": report,
+            "anomalies": anomalies,
+        },
+        prompt_text=prompt,
     )
 
-    response_text = getattr(response, "text", None)
+    started_at = time.perf_counter()
+    response_text: str | None = None
 
-    if not response_text or not response_text.strip():
-        raise ValueError(
-            "Gemini không trả về nội dung phân tích. "
-            "Vui lòng thử lại sau."
+    def finalize_audit(
+        *,
+        status: str,
+        validation_status: str,
+        error: Exception | None = None,
+        validated_result: dict | None = None,
+    ) -> None:
+        finish_ai_audit_log(
+            audit_id,
+            status=status,
+            validation_status=validation_status,
+            raw_response=response_text,
+            validated_result=validated_result,
+            error=error,
+            duration_ms=int(
+                (time.perf_counter() - started_at) * 1000
+            ),
         )
 
+    # Giai đoạn 1: gọi Gemini.
+    # Chỉ lỗi phát sinh trong quá trình gọi AI được phân loại là error.
     try:
+        response = call_gemini_with_retry(
+            lambda: get_client().models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config={
+                    "response_mime_type": "application/json",
+                    "response_schema": _gemini_response_schema(
+                        DeepAIAnalysis
+                    ),
+                    "temperature": 0.2,
+                },
+            )
+        )
+    except Exception as exc:
+        finalize_audit(
+            status="error",
+            validation_status="not_run",
+            error=exc,
+        )
+        raise
+
+    # Giai đoạn 2: kiểm định JSON, dữ liệu và chuẩn hóa nghiệp vụ.
+    # Bất kỳ lỗi nào trong giai đoạn này đều là validation_failed.
+    try:
+        response_text = getattr(response, "text", None)
+
+        if not response_text or not response_text.strip():
+            raise ValueError(
+                "Gemini không trả về nội dung phân tích hợp lệ."
+            )
+
         analysis = DeepAIAnalysis.model_validate_json(
             response_text
         )
-    except Exception as exc:
-        raise ValueError(
-            "Không thể xác thực cấu trúc phản hồi phân tích từ Gemini."
-        ) from exc
 
-    analysis = _validate_risk_areas(
-        analysis,
-        report,
-    )
-    analysis = _normalize_group_analysis_observations(
-        analysis,
-        context,
-    )
-    analysis = _normalize_quality_observations(
-        analysis,
-        report,
-    )
-    analysis.executive_summary.summary = normalize_summary_record_scope(
-        analysis.executive_summary.summary,
-        report,
-    )
-    analysis.executive_summary.summary = (
-        _normalize_aggregate_defect_rate_wording(
-            analysis.executive_summary.summary
+        analysis = _validate_risk_areas(
+            analysis,
+            report,
         )
-    )
-    analysis.executive_summary.key_observations = [
-        _normalize_aggregate_defect_rate_wording(observation)
-        for observation in analysis.executive_summary.key_observations
-    ]
-    analysis = _normalize_recommendation_priorities(
-        analysis,
-        report,
-    )
-    analysis = _normalize_risk_levels(
-        analysis,
-        report,
-    )
 
-    result = analysis.model_dump()
+        analysis = _normalize_group_analysis_observations(
+            analysis,
+            context,
+        )
 
-    result = enrich_risk_areas(
-        result,
-        report,
+        analysis = _normalize_quality_observations(
+            analysis,
+            report,
+        )
+
+        analysis.executive_summary.summary = (
+            normalize_summary_record_scope(
+                analysis.executive_summary.summary,
+                report,
+            )
+        )
+
+        analysis.executive_summary.summary = (
+            _normalize_aggregate_defect_rate_wording(
+                analysis.executive_summary.summary
+            )
+        )
+
+        analysis.executive_summary.key_observations = [
+            _normalize_aggregate_defect_rate_wording(
+                observation
+            )
+            for observation in (
+                analysis.executive_summary.key_observations
+            )
+        ]
+
+        analysis = _normalize_recommendation_priorities(
+            analysis,
+            report,
+        )
+
+        analysis = _normalize_risk_levels(
+            analysis,
+            report,
+        )
+
+        result = analysis.model_dump()
+
+        result = enrich_risk_areas(
+            result,
+            report,
+        )
+
+    except Exception as exc:
+        finalize_audit(
+            status="validation_failed",
+            validation_status="failed",
+            error=exc,
+        )
+        raise
+
+    # Giai đoạn 3: toàn bộ kiểm định và chuẩn hóa đã thành công.
+    finalize_audit(
+        status="success",
+        validation_status="passed",
+        validated_result=result,
     )
 
     return result
