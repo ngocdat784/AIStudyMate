@@ -40,9 +40,10 @@ def start_ai_audit_log(
     Returns the audit ID, or None if audit storage is unavailable.
     Audit failures must not replace the original AI operation's outcome.
     """
-    db: Session = SessionLocal()
+    db: Session | None = None
 
     try:
+        db = SessionLocal()
         record = AIAuditLog(
             analysis_type=analysis_type,
             model_name=model_name,
@@ -60,7 +61,8 @@ def start_ai_audit_log(
         return record.id
 
     except Exception:
-        db.rollback()
+        if db is not None:
+            db.rollback()
         logger.exception(
             "Could not create AI audit log for analysis_type=%s",
             analysis_type,
@@ -68,7 +70,8 @@ def start_ai_audit_log(
         return None
 
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
 def finish_ai_audit_log(
@@ -109,9 +112,10 @@ def finish_ai_audit_log(
             f"Unsupported validation status: {validation_status}"
         )
 
-    db: Session = SessionLocal()
+    db: Session | None = None
 
     try:
+        db = SessionLocal()
         record = db.scalar(
             select(AIAuditLog).where(AIAuditLog.id == audit_id)
         )
@@ -143,7 +147,8 @@ def finish_ai_audit_log(
         return True
 
     except Exception:
-        db.rollback()
+        if db is not None:
+            db.rollback()
         logger.exception(
             "Could not finalize AI audit log id=%s",
             audit_id,
@@ -151,4 +156,5 @@ def finish_ai_audit_log(
         return False
 
     finally:
-        db.close()
+        if db is not None:
+            db.close()
