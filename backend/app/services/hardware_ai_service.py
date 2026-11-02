@@ -165,6 +165,17 @@ class HardwareTrendRecommendedAction(StrictModel):
     action: str = Field(min_length=1, max_length=500)
     purpose: str = Field(min_length=1, max_length=500)
     priority: Literal["low", "medium", "high", "critical"]
+    related_metrics: list[
+        Literal["production", "defects", "defect_rate", "downtime"]
+    ] = Field(min_length=1, max_length=4)
+    evidence_ids: list[str] = Field(min_length=1, max_length=10)
+
+
+class HardwareTrendInvestigationItem(StrictModel):
+    content: str = Field(min_length=1, max_length=500)
+    related_metrics: list[
+        Literal["production", "defects", "defect_rate", "downtime"]
+    ] = Field(min_length=1, max_length=4)
     evidence_ids: list[str] = Field(min_length=1, max_length=10)
 
 
@@ -178,6 +189,14 @@ class HardwareTrendAnalysis(StrictModel):
     risk_areas: list[HardwareTrendRiskArea] = Field(max_length=10)
     recommended_actions: list[HardwareTrendRecommendedAction] = Field(
         min_length=1,
+        max_length=10,
+    )
+    investigation_questions: list[HardwareTrendInvestigationItem] = Field(
+        default_factory=list,
+        max_length=10,
+    )
+    verification_steps: list[HardwareTrendInvestigationItem] = Field(
+        default_factory=list,
         max_length=10,
     )
     limitations: list[str] = Field(min_length=1, max_length=10)
@@ -1810,6 +1829,25 @@ def _build_hardware_trend_evidence(
 ) -> dict[str, dict[str, Any]]:
     evidence: dict[str, dict[str, Any]] = {}
     summary = report.get("summary", {})
+    evidence["data_quality"] = {
+        "type": "data_quality",
+        "rows_in_range": summary.get("rows_in_range", 0),
+        "rows_used": summary.get("rows_used", 0),
+        "rows_excluded": summary.get("rows_excluded", 0),
+        "rows_outside_requested_range": summary.get(
+            "rows_outside_requested_range", 0
+        ),
+        "invalid_date_rows": summary.get("invalid_date_rows", 0),
+        "missing_date_rows": summary.get("missing_date_rows", 0),
+        "records_used": summary.get("records_used", {}),
+        "records_excluded": summary.get("records_excluded", {}),
+        "invalid_numeric_values": summary.get(
+            "invalid_numeric_values", {}
+        ),
+        "missing_numeric_values": summary.get(
+            "missing_numeric_values", {}
+        ),
+    }
 
     for metric, trend in summary.get("overall_trends", {}).items():
         evidence[f"trend_{metric}"] = {
@@ -1886,6 +1924,53 @@ def _build_hardware_trend_evidence(
     return _clean_for_json(evidence)
 
 
+def _get_evidence_metrics(
+    evidence_item: dict[str, Any],
+) -> set[str]:
+    """Identify the metrics directly supported by one evidence item."""
+    metric_fields = {
+        "production": (
+            "production_delta",
+            "production_change_percent",
+        ),
+        "defects": (
+            "defects_delta",
+            "defects_change_percent",
+        ),
+        "defect_rate": (
+            "defect_rate_delta_percentage_points",
+        ),
+        "downtime": (
+            "downtime_delta",
+            "downtime_change_percent",
+        ),
+    }
+    evidence_type = evidence_item.get("type")
+    if evidence_type == "overall_trend":
+        metric = evidence_item.get("metric")
+        return {metric} if metric in metric_fields else set()
+
+    if evidence_type == "period_change":
+        return {
+            metric
+            for metric, fields in metric_fields.items()
+            if any(
+                isinstance(evidence_item.get(field), (int, float))
+                and not isinstance(evidence_item.get(field), bool)
+                for field in fields
+            )
+        }
+
+    anomaly_metrics = {
+        "production_drop": "production",
+        "defects_increase": "defects",
+        "defect_rate_increase": "defect_rate",
+        "downtime_increase": "downtime",
+    }
+    metric = anomaly_metrics.get(evidence_type)
+    return {metric} if metric is not None else set()
+
+
 def _validate_hardware_trend_analysis(
     analysis: HardwareTrendAnalysis,
     evidence: dict[str, dict[str, Any]],
@@ -1897,6 +1982,8 @@ def _validate_hardware_trend_analysis(
             *analysis.trend_interpretation,
             *analysis.risk_areas,
             *analysis.recommended_actions,
+            *analysis.investigation_questions,
+            *analysis.verification_steps,
         ]
         for evidence_id in item.evidence_ids
     }
@@ -1907,6 +1994,114 @@ def _validate_hardware_trend_analysis(
             "AI tham chiếu evidence không tồn tại: "
             f"{sorted(unknown_ids)}"
         )
+
+    for item in analysis.trend_interpretation:
+        if not any(
+            item.metric in _get_evidence_metrics(evidence[evidence_id])
+            for evidence_id in item.evidence_ids
+        ):
+            raise ValueError(
+                "Nhận xét xu hướng không có evidence hỗ trợ đúng metric."
+            )
+
+    area_metrics = {
+        "production_stability": {"production"},
+        "quality": {"defects", "defect_rate"},
+        "downtime": {"downtime"},
+    }
+    for item in analysis.risk_areas:
+        if item.area == "data_quality":
+            data_quality_evidence = [
+                evidence[evidence_id]
+                for evidence_id in item.evidence_ids
+                if evidence[evidence_id].get("type") == "data_quality"
+            ]
+
+            def contains_positive_count(value: Any) -> bool:
+                if isinstance(value, dict):
+                    return any(
+                        contains_positive_count(count)
+                        for count in value.values()
+                    )
+                return (
+                    isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    and value > 0
+                )
+
+            quality_count_fields = (
+                "rows_excluded",
+                "invalid_date_rows",
+                "missing_date_rows",
+                "records_excluded",
+                "invalid_numeric_values",
+                "missing_numeric_values",
+            )
+            has_quality_issue = any(
+                contains_positive_count(item.get(field))
+                for item in data_quality_evidence
+                for field in quality_count_fields
+            )
+            if not has_quality_issue:
+                raise ValueError(
+                    "Rủi ro data_quality cần evidence có dữ liệu bị loại, "
+                    "thiếu hoặc không hợp lệ."
+                )
+            continue
+
+        supported_metrics = area_metrics[item.area]
+        if not any(
+            _get_evidence_metrics(evidence[evidence_id])
+            & supported_metrics
+            for evidence_id in item.evidence_ids
+        ):
+            raise ValueError(
+                "Rủi ro không có evidence hỗ trợ đúng metric."
+            )
+
+    for item in analysis.recommended_actions:
+        supported_metrics = set().union(
+            *(
+                _get_evidence_metrics(evidence[evidence_id])
+                for evidence_id in item.evidence_ids
+            )
+        )
+        unsupported_metrics = set(item.related_metrics).difference(
+            supported_metrics
+        )
+        if unsupported_metrics:
+            raise ValueError(
+                "Metric của hành động không được evidence của chính hành "
+                f"động hỗ trợ: {sorted(unsupported_metrics)}"
+            )
+
+    investigation_groups = (
+        (
+            "Câu hỏi điều tra",
+            analysis.investigation_questions,
+        ),
+        (
+            "Bước xác minh",
+            analysis.verification_steps,
+        ),
+    )
+    for group_name, items in investigation_groups:
+        for item in items:
+            supported_metrics = set().union(
+                *(
+                    _get_evidence_metrics(evidence[evidence_id])
+                    for evidence_id in item.evidence_ids
+                )
+            )
+            unsupported_metrics = set(item.related_metrics).difference(
+                supported_metrics
+            )
+            if unsupported_metrics:
+                raise ValueError(
+                    f"{group_name} có metric không được evidence "
+                    f"của chính nội dung đó hỗ trợ: "
+                    f"{sorted(unsupported_metrics)}"
+                )
 
     overall_trends = report.get("summary", {}).get("overall_trends", {})
     changes = report.get("period_changes", [])
@@ -1945,6 +2140,8 @@ def _validate_hardware_trend_analysis(
             for item in analysis.recommended_actions
             for text in (item.action, item.purpose)
         ],
+        *[item.content for item in analysis.investigation_questions],
+        *[item.content for item in analysis.verification_steps],
         *analysis.limitations,
     ]
     if any(re.search(r"\d", text) for text in narrative_text):
@@ -1973,6 +2170,8 @@ def analyze_hardware_trends_with_ai(
         "Thay vào đó, trích dẫn bằng summary_evidence_ids hoặc evidence_ids "
         "chính xác từ evidence. Mỗi nhận định phải có bằng chứng; trường "
         "direction phải khớp với hướng do Python cung cấp. "
+        "Evidence data_quality chỉ mô tả chất lượng dữ liệu đầu vào; "
+        "không kết luận có vấn đề chỉ vì evidence này tồn tại. "
         "Chỉ nêu rủi ro thống kê, không "
         "khẳng định nguyên nhân hoặc quan hệ nhân quả. Phân biệt cảnh báo "
         "với lỗi đã được xác nhận. Đề xuất các bước kiểm tra khả thi và "
@@ -1989,7 +2188,8 @@ def analyze_hardware_trends_with_ai(
         'hoặc "de_xuat_va_gioi_han".\n'
         "4. Phải sử dụng chính xác các khóa cấp cao nhất sau: "
         "summary, summary_evidence_ids, trend_interpretation, "
-        "risk_areas, recommended_actions, limitations.\n"
+        "risk_areas, recommended_actions, investigation_questions, "
+        "verification_steps, limitations.\n"
         "5. Các khóa và giá trị enum phải tuân thủ cấu trúc đã yêu cầu. "
         "Nội dung diễn giải có thể bằng tiếng Việt.\n"
         "6. Không thêm khóa ngoài cấu trúc đã yêu cầu."
@@ -2004,7 +2204,39 @@ def analyze_hardware_trends_with_ai(
         "trị production_stability, quality, downtime, data_quality. "
         "Không dùng khóa type hoặc description.\n"
         "- recommended_actions là danh sách object, mỗi object có action, "
-        "purpose, priority, evidence_ids; không trả về chuỗi đơn thuần.\n"
+        "purpose, priority, related_metrics, evidence_ids; không trả về "
+        "chuỗi đơn thuần. related_metrics chỉ nhận production, defects, "
+        "defect_rate hoặc downtime.\n"
+        "- Mỗi related_metrics phải được hỗ trợ bởi ít nhất một "
+        "evidence_ids của chính action đó.\n"
+        "- investigation_questions la danh sach object. "
+        "Moi object phai co content, related_metrics, evidence_ids.\n"
+        "- verification_steps la danh sach object. "
+        "Moi object phai co content, related_metrics, evidence_ids.\n"
+        "- content cua investigation_questions phai la cau hoi dieu tra, "
+        "khong duoc viet nhu mot ket luan da duoc xac nhan.\n"
+        "- content cua verification_steps phai mo ta buoc kiem tra cu the "
+        "de xac nhan hoac bac bo gia thuyet.\n"
+        "- related_metrics chi nhan production, defects, defect_rate "
+        "hoac downtime.\n"
+        "- Moi related_metrics phai duoc ho tro boi it nhat mot evidence_id "
+        "cua chinh object do.\n"
+        "- Khong tu tao ten nha cung cap, lo hang, thiet bi, nhan vien "
+        "hoac nguyen nhan khi evidence khong cung cap thong tin.\n"
+        "- Khong bien bien dong thong ke hoac su trung hop ve thoi gian "
+        "thanh ket luan ve nguyen nhan.\n"
+        "- Neu khong du evidence de dua ra cau hoi dieu tra hoac buoc "
+        "xac minh cu the, tra ve danh sach rong.\n"
+        "- Khong khang dinh hanh dong da duoc thuc hien hoac nguyen nhan "
+        "da duoc xac nhan.\n"
+        "- trend_interpretation phải trích dẫn evidence có metric khớp "
+        "với metric được nhận xét.\n"
+        "- production_stability chỉ sử dụng evidence sản lượng.\n"
+        "- quality chỉ sử dụng evidence số lỗi hoặc tỷ lệ lỗi.\n"
+        "- downtime chỉ sử dụng evidence thời gian dừng.\n"
+        "- data_quality chỉ được sử dụng khi evidence data_quality chứa "
+        "số lượng dữ liệu bị loại, thiếu hoặc không hợp lệ lớn hơn 0.\n"
+        "- Evidence period đơn thuần không đủ để chứng minh hướng xu hướng.\n"
         "- summary_evidence_ids phải là danh sách ID bằng chứng.\n"
         "- limitations phải là danh sách chuỗi.\n"
         "- Các danh sách và object phải tuân thủ đúng schema.\n"

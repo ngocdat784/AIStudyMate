@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.services.hardware_ai_service import (
     HardwareTrendAnalysis,
+    _build_hardware_trend_evidence,
     _validate_hardware_trend_analysis,
     analyze_hardware_trends_with_ai,
 )
@@ -55,6 +56,24 @@ def _valid_ai_result():
                 "action": "Đối chiếu lịch sản xuất và nhật ký vận hành.",
                 "purpose": "Xác minh các yếu tố liên quan đến biến động.",
                 "priority": "high",
+                "related_metrics": ["production"],
+                "evidence_ids": ["anomaly_0"],
+            }
+        ],
+        "investigation_questions": [
+            {
+                "content": (
+                    "Có yếu tố vận hành nào cần được kiểm tra liên quan "
+                    "đến biến động sản lượng không?"
+                ),
+                "related_metrics": ["production"],
+                "evidence_ids": ["anomaly_0"],
+            }
+        ],
+        "verification_steps": [
+            {
+                "content": "Đối chiếu nhật ký vận hành với dữ liệu sản lượng.",
+                "related_metrics": ["production"],
                 "evidence_ids": ["anomaly_0"],
             }
         ],
@@ -65,6 +84,41 @@ def _valid_ai_result():
 
 
 class HardwareTrendAIServiceTests(unittest.TestCase):
+    def test_evidence_includes_python_data_quality_summary(self):
+        report = {
+            "summary": {
+                "rows_in_range": 10,
+                "rows_used": 8,
+                "rows_excluded": 2,
+                "rows_outside_requested_range": 1,
+                "invalid_date_rows": 1,
+                "missing_date_rows": 0,
+                "records_used": {"Production": 8},
+                "records_excluded": {"Production": 2},
+                "invalid_numeric_values": {"Production": 1},
+                "missing_numeric_values": {"Production": 1},
+            }
+        }
+
+        evidence = _build_hardware_trend_evidence(report)
+
+        self.assertEqual(
+            evidence["data_quality"],
+            {
+                "type": "data_quality",
+                "rows_in_range": 10,
+                "rows_used": 8,
+                "rows_excluded": 2,
+                "rows_outside_requested_range": 1,
+                "invalid_date_rows": 1,
+                "missing_date_rows": 0,
+                "records_used": {"Production": 8},
+                "records_excluded": {"Production": 2},
+                "invalid_numeric_values": {"Production": 1},
+                "missing_numeric_values": {"Production": 1},
+            },
+        )
+
     def test_analysis_uses_python_evidence_and_validates_ai_response(self):
         report = _trend_report()
         response = Mock(
@@ -102,12 +156,47 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
         )
         self.assertNotIn("response_schema", request["config"])
         self.assertIn("response_json_schema", request["config"])
-        self.assertIn("$defs", request["config"]["response_json_schema"])
+        action_schema = request["config"]["response_json_schema"]["properties"][
+            "recommended_actions"
+        ]["items"]["properties"]
+        self.assertEqual(
+            action_schema["related_metrics"]["items"]["enum"],
+            ["production", "defects", "defect_rate", "downtime"],
+        )
+        self.assertIn(
+            "related_metrics",
+            request["config"]["response_json_schema"]["properties"][
+                "recommended_actions"
+            ]["items"]["required"],
+        )
+        schema_properties = request["config"]["response_json_schema"][
+            "properties"
+        ]
+        for field_name in (
+            "investigation_questions",
+            "verification_steps",
+        ):
+            self.assertIn(field_name, schema_properties)
+            item_properties = schema_properties[field_name]["items"][
+                "properties"
+            ]
+            self.assertIn("content", item_properties)
+            self.assertIn("related_metrics", item_properties)
+            self.assertIn("evidence_ids", item_properties)
         self.assertIn("Không tính lại", request["contents"])
         self.assertIn("evidence", request["contents"])
         self.assertIn("summary_evidence_ids", request["contents"])
         self.assertIn("trend_interpretation", request["contents"])
         self.assertIn("recommended_actions", request["contents"])
+        self.assertIn("investigation_questions", request["contents"])
+        self.assertIn("verification_steps", request["contents"])
+        self.assertIn("gia thuyet", request["contents"])
+        self.assertIn("xac nhan hoac bac bo", request["contents"])
+        self.assertIn("related_metrics", request["contents"])
+        self.assertIn(
+            "không kết luận có vấn đề chỉ vì evidence này tồn tại",
+            request["contents"],
+        )
         self.assertIn("QUY TẮC ĐỊNH DẠNG JSON BẮT BUỘC", request["contents"])
         self.assertIn("không được bỏ observation", request["contents"])
         self.assertIn("Không dùng khóa type hoặc description", request["contents"])
@@ -161,8 +250,21 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
             return False
 
         self.assertFalse(find_unsupported_constraints(schema))
-        self.assertIn("$defs", schema)
-        self.assertIn("$ref", str(schema))
+        self.assertIn(
+            "related_metrics",
+            schema["properties"]["recommended_actions"]["items"]["properties"],
+        )
+        for field_name in (
+            "investigation_questions",
+            "verification_steps",
+        ):
+            self.assertIn(field_name, schema["properties"])
+            item_properties = schema["properties"][field_name]["items"][
+                "properties"
+            ]
+            self.assertIn("content", item_properties)
+            self.assertIn("related_metrics", item_properties)
+            self.assertIn("evidence_ids", item_properties)
 
     def test_analysis_rejects_unknown_evidence_references(self):
         report = _trend_report()
@@ -208,9 +310,67 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
         )
         log_error.assert_called_once()
         self.assertIn(
-            "HardwareTrendAnalysis",
+            "related_metrics",
             log_error.call_args.args[1],
         )
+
+    def test_analysis_rejects_unknown_investigation_evidence(self):
+        result = _valid_ai_result()
+        result["investigation_questions"][0]["evidence_ids"] = [
+            "missing_investigation"
+        ]
+        analysis = HardwareTrendAnalysis.model_validate(result)
+        evidence = {
+            "trend_production": {
+                "type": "overall_trend",
+                "metric": "production",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "evidence_kind": "anomaly",
+            },
+        }
+
+        with self.assertRaisesRegex(ValueError, "AI tham chiếu evidence"):
+            _validate_hardware_trend_analysis(
+                analysis,
+                evidence,
+                _trend_report(),
+            )
+
+    def test_analysis_rejects_unsupported_investigation_metric(self):
+        result = _valid_ai_result()
+        result["investigation_questions"][0]["related_metrics"] = [
+            "defect_rate"
+        ]
+        analysis = HardwareTrendAnalysis.model_validate(result)
+        evidence = {
+            "trend_production": {
+                "type": "overall_trend",
+                "metric": "production",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "evidence_kind": "anomaly",
+            },
+        }
+
+        with self.assertRaisesRegex(ValueError, "Câu hỏi điều tra"):
+            _validate_hardware_trend_analysis(
+                analysis,
+                evidence,
+                _trend_report(),
+            )
+
+    def test_investigation_fields_default_to_empty_lists(self):
+        result = _valid_ai_result()
+        result.pop("investigation_questions")
+        result.pop("verification_steps")
+
+        analysis = HardwareTrendAnalysis.model_validate(result)
+
+        self.assertEqual(analysis.investigation_questions, [])
+        self.assertEqual(analysis.verification_steps, [])
 
     def test_analysis_logs_and_reraises_pydantic_validation_error(self):
         invalid_result = _valid_ai_result()
@@ -245,9 +405,11 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
         evidence = {
             "trend_production": {
                 "type": "overall_trend",
+                "metric": "production",
             },
             "anomaly_0": {
-                "type": "anomaly",
+                "type": "production_drop",
+                "evidence_kind": "anomaly",
             },
         }
 
@@ -262,11 +424,125 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
         analysis = HardwareTrendAnalysis.model_validate(_valid_ai_result())
         analysis.trend_interpretation[0].direction = "increasing"
         evidence = {
-            "trend_production": {"type": "overall_trend"},
-            "anomaly_0": {"type": "anomaly"},
+            "trend_production": {
+                "type": "overall_trend",
+                "metric": "production",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "evidence_kind": "anomaly",
+            },
         }
 
         with self.assertRaisesRegex(ValueError, "không khớp kết quả Python"):
+            _validate_hardware_trend_analysis(
+                analysis,
+                evidence,
+                _trend_report(),
+            )
+
+    def test_analysis_rejects_trend_metric_without_matching_evidence(self):
+        result = _valid_ai_result()
+        result["summary_evidence_ids"] = ["trend_defects"]
+        result["trend_interpretation"][0]["evidence_ids"] = [
+            "trend_defects"
+        ]
+        analysis = HardwareTrendAnalysis.model_validate(result)
+        evidence = {
+            "trend_defects": {
+                "type": "overall_trend",
+                "metric": "defects",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "evidence_kind": "anomaly",
+            },
+        }
+
+        with self.assertRaises(ValueError):
+            _validate_hardware_trend_analysis(
+                analysis,
+                evidence,
+                _trend_report(),
+            )
+
+    def test_analysis_rejects_risk_area_without_matching_evidence(self):
+        result = _valid_ai_result()
+        result["risk_areas"][0]["evidence_ids"] = [
+            "anomaly_downtime"
+        ]
+        analysis = HardwareTrendAnalysis.model_validate(result)
+        evidence = {
+            "trend_production": {
+                "type": "overall_trend",
+                "metric": "production",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "evidence_kind": "anomaly",
+            },
+            "anomaly_downtime": {
+                "type": "downtime_increase",
+                "evidence_kind": "anomaly",
+            },
+        }
+
+        with self.assertRaises(ValueError):
+            _validate_hardware_trend_analysis(
+                analysis,
+                evidence,
+                _trend_report(),
+            )
+
+    def test_analysis_rejects_action_metric_without_matching_evidence(self):
+        result = _valid_ai_result()
+        result["recommended_actions"][0]["related_metrics"] = ["defect_rate"]
+        analysis = HardwareTrendAnalysis.model_validate(result)
+        evidence = {
+            "trend_production": {
+                "type": "overall_trend",
+                "metric": "production",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "evidence_kind": "anomaly",
+            },
+        }
+
+        with self.assertRaisesRegex(ValueError, "Metric của hành động"):
+            _validate_hardware_trend_analysis(
+                analysis,
+                evidence,
+                _trend_report(),
+            )
+
+    def test_analysis_rejects_data_quality_risk_without_quality_counts(self):
+        result = _valid_ai_result()
+        result["risk_areas"][0]["area"] = "data_quality"
+        result["risk_areas"][0]["evidence_ids"] = ["data_quality"]
+        analysis = HardwareTrendAnalysis.model_validate(result)
+        evidence = {
+            "trend_production": {
+                "type": "overall_trend",
+                "metric": "production",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "evidence_kind": "anomaly",
+            },
+            "data_quality": {
+                "type": "data_quality",
+                "rows_excluded": 0,
+                "rows_outside_requested_range": 5,
+                "invalid_date_rows": 0,
+                "missing_date_rows": 0,
+                "records_excluded": {},
+                "invalid_numeric_values": {},
+                "missing_numeric_values": {},
+            },
+        }
+
+        with self.assertRaisesRegex(ValueError, "Rủi ro data_quality"):
             _validate_hardware_trend_analysis(
                 analysis,
                 evidence,
