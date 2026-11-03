@@ -26,6 +26,24 @@ def _safe_error_message(exc: Exception) -> str:
     return message[:MAX_ERROR_MESSAGE_LENGTH]
 
 
+def _safe_rollback(db: Session | None) -> None:
+    if db is None:
+        return
+    try:
+        db.rollback()
+    except Exception:
+        logger.exception("Could not rollback AI audit database session")
+
+
+def _safe_close(db: Session | None) -> None:
+    if db is None:
+        return
+    try:
+        db.close()
+    except Exception:
+        logger.exception("Could not close AI audit database session")
+
+
 def start_ai_audit_log(
     *,
     analysis_type: str,
@@ -61,8 +79,7 @@ def start_ai_audit_log(
         return record.id
 
     except Exception:
-        if db is not None:
-            db.rollback()
+        _safe_rollback(db)
         logger.exception(
             "Could not create AI audit log for analysis_type=%s",
             analysis_type,
@@ -70,8 +87,7 @@ def start_ai_audit_log(
         return None
 
     finally:
-        if db is not None:
-            db.close()
+        _safe_close(db)
 
 
 def finish_ai_audit_log(
@@ -147,8 +163,7 @@ def finish_ai_audit_log(
         return True
 
     except Exception:
-        if db is not None:
-            db.rollback()
+        _safe_rollback(db)
         logger.exception(
             "Could not finalize AI audit log id=%s",
             audit_id,
@@ -156,5 +171,4 @@ def finish_ai_audit_log(
         return False
 
     finally:
-        if db is not None:
-            db.close()
+        _safe_close(db)

@@ -164,6 +164,7 @@ class HardwareTrendRiskArea(StrictModel):
 class HardwareTrendRecommendedAction(StrictModel):
     action: str = Field(min_length=1, max_length=500)
     purpose: str = Field(min_length=1, max_length=500)
+    action_type: Literal["inspection", "investigation", "corrective"]
     priority: Literal["low", "medium", "high", "critical"]
     related_metrics: list[
         Literal["production", "defects", "defect_rate", "downtime"]
@@ -188,7 +189,7 @@ class HardwareTrendAnalysis(StrictModel):
     )
     risk_areas: list[HardwareTrendRiskArea] = Field(max_length=10)
     recommended_actions: list[HardwareTrendRecommendedAction] = Field(
-        min_length=1,
+        default_factory=list,
         max_length=10,
     )
     investigation_questions: list[HardwareTrendInvestigationItem] = Field(
@@ -1971,6 +1972,27 @@ def _get_evidence_metrics(
     return {metric} if metric is not None else set()
 
 
+def _get_evidence_priority_cap(
+    evidence_items: list[dict[str, Any]],
+) -> str:
+    priority_order = ("low", "medium", "high", "critical")
+    severity_to_priority = {
+        "low": "low",
+        "medium": "medium",
+        "notable": "high",
+        "high": "high",
+        "critical": "critical",
+    }
+    evidence_priorities = [
+        severity_to_priority[item["severity"]]
+        for item in evidence_items
+        if item.get("severity") in severity_to_priority
+    ]
+    if not evidence_priorities:
+        return "medium"
+    return max(evidence_priorities, key=priority_order.index)
+
+
 def _validate_hardware_trend_analysis(
     analysis: HardwareTrendAnalysis,
     evidence: dict[str, dict[str, Any]],
@@ -2047,16 +2069,37 @@ def _validate_hardware_trend_analysis(
                     "Rủi ro data_quality cần evidence có dữ liệu bị loại, "
                     "thiếu hoặc không hợp lệ."
                 )
-            continue
+            supported_metrics = set()
+        else:
+            supported_metrics = area_metrics[item.area]
+            if not any(
+                _get_evidence_metrics(evidence[evidence_id])
+                & supported_metrics
+                for evidence_id in item.evidence_ids
+            ):
+                raise ValueError(
+                    "Rủi ro không có evidence hỗ trợ đúng metric."
+                )
 
-        supported_metrics = area_metrics[item.area]
-        if not any(
-            _get_evidence_metrics(evidence[evidence_id])
-            & supported_metrics
+        relevant_evidence = [
+            evidence[evidence_id]
             for evidence_id in item.evidence_ids
+            if (
+                evidence[evidence_id].get("type") == "data_quality"
+                if item.area == "data_quality"
+                else bool(
+                    _get_evidence_metrics(evidence[evidence_id])
+                    & supported_metrics
+                )
+            )
+        ]
+        priority_cap = _get_evidence_priority_cap(relevant_evidence)
+        if (
+            ("low", "medium", "high", "critical").index(item.priority)
+            > ("low", "medium", "high", "critical").index(priority_cap)
         ):
             raise ValueError(
-                "Rủi ro không có evidence hỗ trợ đúng metric."
+                "Mức ưu tiên rủi ro vượt quá evidence Python."
             )
 
     for item in analysis.recommended_actions:
@@ -2073,6 +2116,38 @@ def _validate_hardware_trend_analysis(
             raise ValueError(
                 "Metric của hành động không được evidence của chính hành "
                 f"động hỗ trợ: {sorted(unsupported_metrics)}"
+            )
+        if item.action_type == "corrective":
+            raise ValueError(
+                "Không thể đề xuất hành động khắc phục khi nguyên nhân "
+                "chưa được xác minh."
+            )
+        action_anomaly_metrics = set().union(
+            *(
+                _get_evidence_metrics(evidence[evidence_id])
+                for evidence_id in item.evidence_ids
+                if evidence[evidence_id].get("evidence_kind") == "anomaly"
+            )
+        )
+        if not set(item.related_metrics).issubset(action_anomaly_metrics):
+            raise ValueError(
+                "Hành động không trích dẫn anomaly Python cho metric liên quan."
+            )
+        relevant_evidence = [
+            evidence[evidence_id]
+            for evidence_id in item.evidence_ids
+            if (
+                _get_evidence_metrics(evidence[evidence_id])
+                & set(item.related_metrics)
+            )
+        ]
+        priority_cap = _get_evidence_priority_cap(relevant_evidence)
+        if (
+            ("low", "medium", "high", "critical").index(item.priority)
+            > ("low", "medium", "high", "critical").index(priority_cap)
+        ):
+            raise ValueError(
+                "Mức ưu tiên hành động vượt quá evidence Python."
             )
 
     investigation_groups = (
@@ -2204,11 +2279,20 @@ def analyze_hardware_trends_with_ai(
         "trị production_stability, quality, downtime, data_quality. "
         "Không dùng khóa type hoặc description.\n"
         "- recommended_actions là danh sách object, mỗi object có action, "
-        "purpose, priority, related_metrics, evidence_ids; không trả về "
-        "chuỗi đơn thuần. related_metrics chỉ nhận production, defects, "
-        "defect_rate hoặc downtime.\n"
+        "purpose, action_type, priority, related_metrics, evidence_ids; "
+        "không trả về chuỗi đơn thuần. action_type chỉ nhận inspection "
+        "(kiểm tra), investigation (điều tra), corrective (khắc phục). "
+        "Trong báo cáo này chỉ được dùng inspection hoặc investigation; "
+        "không đề xuất corrective khi nguyên nhân chưa được xác minh. "
+        "related_metrics chỉ nhận production, defects, defect_rate hoặc "
+        "downtime.\n"
         "- Mỗi related_metrics phải được hỗ trợ bởi ít nhất một "
         "evidence_ids của chính action đó.\n"
+        "- Chỉ đề xuất hành động cho metric có anomaly do Python phát hiện; "
+        "nếu không có metric bất thường thì recommended_actions phải rỗng.\n"
+        "- Khi evidence không có severity, priority tối đa là medium. "
+        "Anomaly severity=notable cho phép tối đa high. Chỉ dùng critical "
+        "khi evidence Python ghi severity=critical.\n"
         "- investigation_questions la danh sach object. "
         "Moi object phai co content, related_metrics, evidence_ids.\n"
         "- verification_steps la danh sach object. "

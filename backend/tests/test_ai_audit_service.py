@@ -24,6 +24,11 @@ class TestAIAuditService(unittest.TestCase):
     @patch.object(audit_service, "SessionLocal")
     def test_start_audit_success(self, session_local):
         session_local.return_value = self.db
+        self.db.refresh.side_effect = lambda record: setattr(
+            record,
+            "id",
+            123,
+        )
 
         result = audit_service.start_ai_audit_log(
             analysis_type="hardware_analysis",
@@ -32,9 +37,8 @@ class TestAIAuditService(unittest.TestCase):
             input_data={"production": 100},
             prompt_text="Test prompt",
         )
-        self.db.refresh.side_effect = lambda record: setattr(record, "id", 123)
 
-        self.assertEqual(result, self.db.add.call_args.args[0].id)
+        self.assertEqual(result, 123)
         self.db.add.assert_called_once()
         self.db.commit.assert_called_once()
         self.db.refresh.assert_called_once()
@@ -80,6 +84,24 @@ class TestAIAuditService(unittest.TestCase):
         )
 
         self.assertIsNone(result)
+
+    @patch.object(audit_service, "SessionLocal")
+    def test_start_audit_cleanup_errors_do_not_escape(self, session_local):
+        session_local.return_value = self.db
+        self.db.commit.side_effect = RuntimeError("Commit failed")
+        self.db.rollback.side_effect = RuntimeError("Rollback failed")
+        self.db.close.side_effect = RuntimeError("Close failed")
+
+        with patch.object(audit_service.logger, "exception"):
+            result = audit_service.start_ai_audit_log(
+                analysis_type="hardware_analysis",
+                model_name="gemini-test",
+                prompt_version="v1",
+            )
+
+        self.assertIsNone(result)
+        self.db.rollback.assert_called_once()
+        self.db.close.assert_called_once()
 
     # --------------------------------------------------
     # FINISH AUDIT
@@ -161,6 +183,54 @@ class TestAIAuditService(unittest.TestCase):
         self.assertEqual(record.error_message, "Invalid AI response")
         self.assertEqual(record.raw_response, "invalid json")
         self.assertIsNone(record.validated_result)
+
+    @patch.object(audit_service, "SessionLocal")
+    def test_finish_audit_close_error_does_not_change_success(
+        self,
+        session_local,
+    ):
+        session_local.return_value = self.db
+        self.db.scalar.return_value = SimpleNamespace(
+            id=123,
+            status="started",
+            validation_status="not_run",
+            raw_response=None,
+            validated_result=None,
+            error_type=None,
+            error_message=None,
+            duration_ms=None,
+            completed_at=None,
+        )
+        self.db.close.side_effect = RuntimeError("Close failed")
+
+        with patch.object(audit_service.logger, "exception"):
+            result = audit_service.finish_ai_audit_log(
+                123,
+                status="success",
+                validation_status="passed",
+            )
+
+        self.assertTrue(result)
+        self.db.commit.assert_called_once()
+        self.db.close.assert_called_once()
+
+    @patch.object(audit_service, "SessionLocal")
+    def test_finish_audit_cleanup_errors_do_not_escape(self, session_local):
+        session_local.return_value = self.db
+        self.db.scalar.side_effect = RuntimeError("Query failed")
+        self.db.rollback.side_effect = RuntimeError("Rollback failed")
+        self.db.close.side_effect = RuntimeError("Close failed")
+
+        with patch.object(audit_service.logger, "exception"):
+            result = audit_service.finish_ai_audit_log(
+                123,
+                status="success",
+                validation_status="passed",
+            )
+
+        self.assertFalse(result)
+        self.db.rollback.assert_called_once()
+        self.db.close.assert_called_once()
 
     def test_finish_audit_with_none_id(self):
         result = audit_service.finish_ai_audit_log(

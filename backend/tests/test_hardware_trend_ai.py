@@ -55,6 +55,7 @@ def _valid_ai_result():
             {
                 "action": "Đối chiếu lịch sản xuất và nhật ký vận hành.",
                 "purpose": "Xác minh các yếu tố liên quan đến biến động.",
+                "action_type": "investigation",
                 "priority": "high",
                 "related_metrics": ["production"],
                 "evidence_ids": ["anomaly_0"],
@@ -169,6 +170,12 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
                 "recommended_actions"
             ]["items"]["required"],
         )
+        self.assertIn(
+            "action_type",
+            request["config"]["response_json_schema"]["properties"][
+                "recommended_actions"
+            ]["items"]["properties"],
+        )
         schema_properties = request["config"]["response_json_schema"][
             "properties"
         ]
@@ -188,6 +195,9 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
         self.assertIn("summary_evidence_ids", request["contents"])
         self.assertIn("trend_interpretation", request["contents"])
         self.assertIn("recommended_actions", request["contents"])
+        self.assertIn("action_type", request["contents"])
+        self.assertIn("không đề xuất corrective", request["contents"])
+        self.assertIn("severity=notable", request["contents"])
         self.assertIn("investigation_questions", request["contents"])
         self.assertIn("verification_steps", request["contents"])
         self.assertIn("gia thuyet", request["contents"])
@@ -351,6 +361,7 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
             },
             "anomaly_0": {
                 "type": "production_drop",
+                "severity": "notable",
                 "evidence_kind": "anomaly",
             },
         }
@@ -409,6 +420,7 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
             },
             "anomaly_0": {
                 "type": "production_drop",
+                "severity": "notable",
                 "evidence_kind": "anomaly",
             },
         }
@@ -430,6 +442,7 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
             },
             "anomaly_0": {
                 "type": "production_drop",
+                "severity": "notable",
                 "evidence_kind": "anomaly",
             },
         }
@@ -505,6 +518,7 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
             },
             "anomaly_0": {
                 "type": "production_drop",
+                "severity": "notable",
                 "evidence_kind": "anomaly",
             },
         }
@@ -515,6 +529,162 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
                 evidence,
                 _trend_report(),
             )
+
+    def test_analysis_rejects_priority_above_python_anomaly_severity(self):
+        result = _valid_ai_result()
+        result["risk_areas"][0]["priority"] = "critical"
+        result["recommended_actions"][0]["priority"] = "critical"
+        analysis = HardwareTrendAnalysis.model_validate(result)
+        evidence = {
+            "trend_production": {
+                "type": "overall_trend",
+                "metric": "production",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "severity": "notable",
+                "evidence_kind": "anomaly",
+            },
+        }
+
+        with self.assertRaisesRegex(ValueError, "Mức ưu tiên rủi ro"):
+            _validate_hardware_trend_analysis(
+                analysis,
+                evidence,
+                _trend_report(),
+            )
+
+    def test_analysis_rejects_high_priority_without_severity_evidence(self):
+        result = _valid_ai_result()
+        result["risk_areas"][0]["priority"] = "high"
+        result["risk_areas"][0]["evidence_ids"] = ["trend_production"]
+        analysis = HardwareTrendAnalysis.model_validate(result)
+        evidence = {
+            "trend_production": {
+                "type": "overall_trend",
+                "metric": "production",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "severity": "notable",
+                "evidence_kind": "anomaly",
+            },
+        }
+
+        with self.assertRaisesRegex(ValueError, "Mức ưu tiên rủi ro"):
+            _validate_hardware_trend_analysis(
+                analysis,
+                evidence,
+                _trend_report(),
+            )
+
+    def test_critical_priority_requires_critical_python_severity(self):
+        result = _valid_ai_result()
+        result["risk_areas"][0]["priority"] = "critical"
+        result["recommended_actions"][0]["priority"] = "critical"
+        analysis = HardwareTrendAnalysis.model_validate(result)
+        evidence = {
+            "trend_production": {
+                "type": "overall_trend",
+                "metric": "production",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "severity": "critical",
+                "evidence_kind": "anomaly",
+            },
+        }
+
+        _validate_hardware_trend_analysis(
+            analysis,
+            evidence,
+            _trend_report(),
+        )
+
+    def test_analysis_rejects_action_priority_above_anomaly_severity(self):
+        result = _valid_ai_result()
+        result["recommended_actions"][0]["priority"] = "critical"
+        analysis = HardwareTrendAnalysis.model_validate(result)
+        evidence = {
+            "trend_production": {
+                "type": "overall_trend",
+                "metric": "production",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "severity": "notable",
+                "evidence_kind": "anomaly",
+            },
+        }
+
+        with self.assertRaisesRegex(ValueError, "Mức ưu tiên hành động"):
+            _validate_hardware_trend_analysis(
+                analysis,
+                evidence,
+                _trend_report(),
+            )
+
+    def test_analysis_rejects_action_without_metric_anomaly(self):
+        result = _valid_ai_result()
+        result["recommended_actions"][0]["related_metrics"] = ["defects"]
+        result["recommended_actions"][0]["evidence_ids"] = [
+            "change_0"
+        ]
+        analysis = HardwareTrendAnalysis.model_validate(result)
+        report = _trend_report()
+        evidence = {
+            "trend_production": {
+                "type": "overall_trend",
+                "metric": "production",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "severity": "notable",
+                "evidence_kind": "anomaly",
+            },
+            "change_0": {
+                "type": "period_change",
+                "defects_delta": 2,
+            },
+        }
+
+        with self.assertRaises(ValueError):
+            _validate_hardware_trend_analysis(
+                analysis,
+                evidence,
+                report,
+            )
+
+    def test_analysis_rejects_corrective_action_without_verified_cause(self):
+        result = _valid_ai_result()
+        result["recommended_actions"][0]["action_type"] = "corrective"
+        analysis = HardwareTrendAnalysis.model_validate(result)
+        evidence = {
+            "trend_production": {
+                "type": "overall_trend",
+                "metric": "production",
+            },
+            "anomaly_0": {
+                "type": "production_drop",
+                "severity": "notable",
+                "evidence_kind": "anomaly",
+            },
+        }
+
+        with self.assertRaisesRegex(ValueError, "nguyên nhân chưa được xác minh"):
+            _validate_hardware_trend_analysis(
+                analysis,
+                evidence,
+                _trend_report(),
+            )
+
+    def test_recommended_actions_default_to_empty_without_evidence(self):
+        result = _valid_ai_result()
+        result.pop("recommended_actions")
+
+        analysis = HardwareTrendAnalysis.model_validate(result)
+
+        self.assertEqual(analysis.recommended_actions, [])
 
     def test_analysis_rejects_data_quality_risk_without_quality_counts(self):
         result = _valid_ai_result()

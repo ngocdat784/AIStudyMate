@@ -402,6 +402,7 @@ type TrendAIAnalysis = {
   recommended_actions: {
     action: string;
     purpose: string;
+    action_type: "inspection" | "investigation" | "corrective";
     priority: "low" | "medium" | "high" | "critical";
     evidence_ids: string[];
   }[];
@@ -3786,24 +3787,37 @@ function HardwareTrendDashboard({
             <div className="trend-ai-panel trend-actions-panel">
               <h4>Đề xuất bước kiểm tra</h4>
               <div className="trend-action-list">
-                {ai.recommended_actions.map((action, index) => (
-                  <article
-                    className="trend-ai-item"
-                    key={`${action.action}-${index}`}
-                  >
-                    <div>
-                      <strong>{action.action}</strong>
-                      <span className={`priority-badge priority-${action.priority}`}>
-                        {action.priority}
-                      </span>
-                    </div>
-                    <p>{action.purpose}</p>
-                    <EvidenceReferences
-                      evidenceIds={action.evidence_ids}
-                      evidence={ai.evidence}
-                    />
-                  </article>
-                ))}
+                {ai.recommended_actions.length === 0 ? (
+                  <p className="trend-ai-muted">
+                    Không có metric bất thường từ Python cần đề xuất hành động.
+                  </p>
+                ) : (
+                  ai.recommended_actions.map((action, index) => (
+                    <article
+                      className="trend-ai-item"
+                      key={`${action.action}-${index}`}
+                    >
+                      <div>
+                        <strong>{action.action}</strong>
+                        <span className="priority-badge">
+                          {{
+                            inspection: "Kiểm tra",
+                            investigation: "Điều tra",
+                            corrective: "Khắc phục",
+                          }[action.action_type]}
+                        </span>
+                        <span className={`priority-badge priority-${action.priority}`}>
+                          {action.priority}
+                        </span>
+                      </div>
+                      <p>{action.purpose}</p>
+                      <EvidenceReferences
+                        evidenceIds={action.evidence_ids}
+                        evidence={ai.evidence}
+                      />
+                    </article>
+                  ))
+                )}
               </div>
             </div>
 
