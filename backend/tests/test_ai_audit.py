@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
+from app.services import ai_audit_context
 from app.services import hardware_ai_service as service
 
 
@@ -19,12 +20,12 @@ class TestHardwareAIAudit(unittest.TestCase):
         }
 
         self.audit_start = patch.object(
-            service,
+            ai_audit_context,
             "start_ai_audit_log",
             return_value=123,
         )
         self.audit_finish = patch.object(
-            service,
+            ai_audit_context,
             "finish_ai_audit_log",
         )
 

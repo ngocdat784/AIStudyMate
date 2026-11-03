@@ -5,12 +5,7 @@ import json
 import logging
 import math
 import re
-import time
 
-from app.services.ai_audit_service import (
-    start_ai_audit_log,
-    finish_ai_audit_log,
-)
 from datetime import date, datetime
 from typing import Any, Literal
 
@@ -18,6 +13,7 @@ from google import genai
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
+from app.services.ai_audit_context import AIAuditContext
 from app.services.gemini_retry import call_gemini_with_retry
 
 
@@ -1597,7 +1593,7 @@ def analyze_hardware_deep(
     )
     prompt = _build_prompt(context)
 
-    audit_id = start_ai_audit_log(
+    audit = AIAuditContext(
         analysis_type="hardware_analysis",
         model_name=GEMINI_MODEL,
         prompt_version="hardware_deep_v1",
@@ -1607,28 +1603,6 @@ def analyze_hardware_deep(
         },
         prompt_text=prompt,
     )
-
-    started_at = time.perf_counter()
-    response_text: str | None = None
-
-    def finalize_audit(
-        *,
-        status: str,
-        validation_status: str,
-        error: Exception | None = None,
-        validated_result: dict | None = None,
-    ) -> None:
-        finish_ai_audit_log(
-            audit_id,
-            status=status,
-            validation_status=validation_status,
-            raw_response=response_text,
-            validated_result=validated_result,
-            error=error,
-            duration_ms=int(
-                (time.perf_counter() - started_at) * 1000
-            ),
-        )
 
     # Giai đoạn 1: gọi Gemini.
     # Chỉ lỗi phát sinh trong quá trình gọi AI được phân loại là error.
@@ -1647,17 +1621,14 @@ def analyze_hardware_deep(
             )
         )
     except Exception as exc:
-        finalize_audit(
-            status="error",
-            validation_status="not_run",
-            error=exc,
-        )
+        audit.fail(exc)
         raise
 
     # Giai đoạn 2: kiểm định JSON, dữ liệu và chuẩn hóa nghiệp vụ.
     # Bất kỳ lỗi nào trong giai đoạn này đều là validation_failed.
     try:
         response_text = getattr(response, "text", None)
+        audit.set_raw_response(response_text)
 
         if not response_text or not response_text.strip():
             raise ValueError(
@@ -1723,19 +1694,11 @@ def analyze_hardware_deep(
         )
 
     except Exception as exc:
-        finalize_audit(
-            status="validation_failed",
-            validation_status="failed",
-            error=exc,
-        )
+        audit.fail(exc, validation_failed=True)
         raise
 
     # Giai đoạn 3: toàn bộ kiểm định và chuẩn hóa đã thành công.
-    finalize_audit(
-        status="success",
-        validation_status="passed",
-        validated_result=result,
-    )
+    audit.succeed(result)
 
     return result
 
