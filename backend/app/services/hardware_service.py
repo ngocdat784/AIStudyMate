@@ -17,6 +17,7 @@ from app.services.data_quality_service import (
 from app.services.anomaly_detection_service import (
     detect_hardware_anomalies,
 )
+from app.services.ai_audit_context import AIAuditContext
 from app.services.gemini_retry import call_gemini_with_retry
 from app.services.hardware_ai_service import (
     _gemini_response_schema,
@@ -1991,32 +1992,46 @@ Recommendations = hành động nên xem xét.
 Chỉ trả về JSON đúng schema.
 """
 
-    interaction = call_gemini_with_retry(
-        lambda: get_client().interactions.create(
-            model=GEMINI_MODEL,
-            input=(
-                SYSTEM_INSTRUCTION
-                + "\n"
-                + prompt
-            ),
-            response_format={
-                "type": "text",
-                "mime_type": "application/json",
-                "schema": _gemini_response_schema(HardwareAnalysis),
-            },
-        ),
+    full_prompt = (
+        SYSTEM_INSTRUCTION
+        + "\n"
+        + prompt
+    )
+    audit = AIAuditContext(
+        analysis_type="hardware_insights",
+        model_name=GEMINI_MODEL,
+        prompt_version="hardware_insights_v1",
+        input_data=context,
+        prompt_text=full_prompt,
     )
 
-    if not interaction.output_text:
-
-        raise Exception(
-            "Gemini không trả về Hardware Insights."
+    try:
+        interaction = call_gemini_with_retry(
+            lambda: get_client().interactions.create(
+                model=GEMINI_MODEL,
+                input=full_prompt,
+                response_format={
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": _gemini_response_schema(HardwareAnalysis),
+                },
+            ),
         )
+    except Exception as error:
+        audit.fail(error)
+        raise
+
+    raw_response = interaction.output_text
+    audit.set_raw_response(raw_response)
+
+    if not raw_response:
+        error = Exception("Gemini không trả về Hardware Insights.")
+        audit.fail(error, validation_failed=True)
+        raise error
 
     try:
-
         analysis = HardwareAnalysis.model_validate_json(
-            interaction.output_text
+            raw_response
         )
         analysis.summary = normalize_summary_record_scope(
             analysis.summary,
@@ -2026,14 +2041,19 @@ Chỉ trả về JSON đúng schema.
             analysis,
             kpis,
         )
+        audit.succeed(analysis.model_dump())
         return analysis
 
     except Exception as error:
-
-        raise Exception(
+        wrapped_error = Exception(
             "Gemini trả về Hardware Insights "
             f"không hợp lệ: {str(error)}"
         )
+        audit.fail(
+            wrapped_error,
+            validation_failed=True,
+        )
+        raise wrapped_error from error
 
 
 # =========================================================

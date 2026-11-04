@@ -1,5 +1,7 @@
+import json
 import unittest
 from datetime import date
+from types import SimpleNamespace
 from typing import Iterator
 from unittest.mock import patch
 
@@ -13,6 +15,10 @@ from app.database.base import Base
 from app.database.connection import get_db
 from app.main import app
 from app.models import AnalysisHistory
+from app.services.hardware_ai_service import (
+    GEMINI_MODEL,
+    explain_hardware_intervention,
+)
 from app.services.hardware_intervention_service import (
     evaluate_hardware_intervention,
 )
@@ -428,6 +434,248 @@ class HardwareInterventionEndpointTests(unittest.TestCase):
         self.assertEqual(missing_dataset.status_code, 404)
         self.assertEqual(invalid_dates.status_code, 422)
         self.assertEqual(unexpected_field.status_code, 422)
+
+
+class HardwareInterventionAIAuditTests(unittest.TestCase):
+    def setUp(self):
+        self.input_result = {
+            "conclusion": "improved",
+            "conclusion_reason": "defect_rate_decreased",
+            "metrics": {
+                "defect_rate": {
+                    "before": 3.0,
+                    "after": 1.5,
+                    "change_percent": -50.0,
+                }
+            },
+            "warnings": [],
+        }
+        self.valid_response = {
+            "summary": "Tỷ lệ lỗi giảm sau can thiệp.",
+            "investigation_points": [
+                "Tiếp tục theo dõi tỷ lệ lỗi.",
+                "Kiểm tra tính ổn định của quy trình.",
+            ],
+        }
+
+    @patch(
+        "app.services.ai_audit_context.start_ai_audit_log",
+        return_value=101,
+    )
+    @patch(
+        "app.services.ai_audit_context.finish_ai_audit_log",
+        return_value=True,
+    )
+    @patch(
+        "app.services.hardware_ai_service.call_gemini_with_retry"
+    )
+    def test_intervention_ai_audit_records_success(
+        self,
+        mock_gemini,
+        mock_finish,
+        mock_start,
+    ):
+        raw_response = json.dumps(
+            self.valid_response,
+            ensure_ascii=False,
+        )
+        mock_gemini.return_value = SimpleNamespace(
+            text=raw_response
+        )
+
+        result = explain_hardware_intervention(self.input_result)
+
+        self.assertEqual(result, self.valid_response)
+        mock_start.assert_called_once()
+        audit_arguments = mock_start.call_args.kwargs
+        self.assertEqual(
+            audit_arguments["analysis_type"],
+            "hardware_intervention",
+        )
+        self.assertEqual(
+            audit_arguments["model_name"],
+            GEMINI_MODEL,
+        )
+        self.assertEqual(
+            audit_arguments["prompt_version"],
+            "hardware_intervention_v1",
+        )
+        self.assertEqual(
+            audit_arguments["input_data"],
+            self.input_result,
+        )
+        self.assertIsInstance(audit_arguments["prompt_text"], str)
+        self.assertIn(
+            json.dumps(self.input_result, ensure_ascii=False),
+            audit_arguments["prompt_text"],
+        )
+        self.assertTrue(callable(mock_gemini.call_args.args[0]))
+
+        mock_finish.assert_called_once()
+        finish_arguments = mock_finish.call_args
+        self.assertEqual(finish_arguments.args[0], 101)
+        self.assertEqual(
+            finish_arguments.kwargs["status"],
+            "success",
+        )
+        self.assertEqual(
+            finish_arguments.kwargs["validation_status"],
+            "passed",
+        )
+        self.assertEqual(
+            finish_arguments.kwargs["raw_response"],
+            raw_response,
+        )
+        self.assertEqual(
+            finish_arguments.kwargs["validated_result"],
+            self.valid_response,
+        )
+        self.assertGreaterEqual(
+            finish_arguments.kwargs["duration_ms"],
+            0,
+        )
+        self.assertIsNone(finish_arguments.kwargs["error"])
+
+    @patch(
+        "app.services.ai_audit_context.start_ai_audit_log",
+        return_value=102,
+    )
+    @patch(
+        "app.services.ai_audit_context.finish_ai_audit_log",
+        return_value=True,
+    )
+    @patch(
+        "app.services.hardware_ai_service.call_gemini_with_retry"
+    )
+    def test_intervention_ai_api_error_is_audited(
+        self,
+        mock_gemini,
+        mock_finish,
+        mock_start,
+    ):
+        error = RuntimeError("Gemini API unavailable")
+        mock_gemini.side_effect = error
+
+        with self.assertRaises(RuntimeError) as raised:
+            explain_hardware_intervention(self.input_result)
+
+        self.assertIs(raised.exception, error)
+        mock_start.assert_called_once()
+        mock_finish.assert_called_once()
+        self.assertEqual(mock_finish.call_args.args[0], 102)
+        self.assertEqual(
+            mock_finish.call_args.kwargs["status"],
+            "error",
+        )
+        self.assertEqual(
+            mock_finish.call_args.kwargs["validation_status"],
+            "not_run",
+        )
+        self.assertIs(mock_finish.call_args.kwargs["error"], error)
+        self.assertIsNone(mock_finish.call_args.kwargs["raw_response"])
+        self.assertIsNone(
+            mock_finish.call_args.kwargs["validated_result"]
+        )
+
+    @patch(
+        "app.services.ai_audit_context.start_ai_audit_log",
+        return_value=103,
+    )
+    @patch(
+        "app.services.ai_audit_context.finish_ai_audit_log",
+        return_value=True,
+    )
+    @patch(
+        "app.services.hardware_ai_service.call_gemini_with_retry"
+    )
+    def test_intervention_ai_empty_response_is_audited(
+        self,
+        mock_gemini,
+        mock_finish,
+        mock_start,
+    ):
+        mock_gemini.return_value = SimpleNamespace(text="")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Không thể xác thực diễn giải can thiệp từ Gemini",
+        ):
+            explain_hardware_intervention(self.input_result)
+
+        mock_start.assert_called_once()
+        mock_finish.assert_called_once()
+        self.assertEqual(mock_finish.call_args.args[0], 103)
+        self.assertEqual(
+            mock_finish.call_args.kwargs["status"],
+            "validation_failed",
+        )
+        self.assertEqual(
+            mock_finish.call_args.kwargs["validation_status"],
+            "failed",
+        )
+        self.assertEqual(
+            mock_finish.call_args.kwargs["raw_response"],
+            "",
+        )
+        self.assertIn(
+            "Gemini không trả về diễn giải can thiệp",
+            str(mock_finish.call_args.kwargs["error"]),
+        )
+        self.assertIsNone(
+            mock_finish.call_args.kwargs["validated_result"]
+        )
+
+    @patch(
+        "app.services.ai_audit_context.start_ai_audit_log",
+        return_value=104,
+    )
+    @patch(
+        "app.services.ai_audit_context.finish_ai_audit_log",
+        return_value=True,
+    )
+    @patch(
+        "app.services.hardware_ai_service.call_gemini_with_retry"
+    )
+    def test_intervention_ai_invalid_schema_is_audited(
+        self,
+        mock_gemini,
+        mock_finish,
+        mock_start,
+    ):
+        invalid_response = json.dumps(
+            {
+                "summary": "Kết quả không đầy đủ.",
+                "unexpected_field": "invalid",
+            },
+            ensure_ascii=False,
+        )
+        mock_gemini.return_value = SimpleNamespace(
+            text=invalid_response
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Không thể xác thực diễn giải can thiệp",
+        ):
+            explain_hardware_intervention(self.input_result)
+
+        mock_start.assert_called_once()
+        mock_finish.assert_called_once()
+        arguments = mock_finish.call_args.kwargs
+        self.assertEqual(mock_finish.call_args.args[0], 104)
+        self.assertEqual(
+            arguments["status"],
+            "validation_failed",
+        )
+        self.assertEqual(
+            arguments["validation_status"],
+            "failed",
+        )
+        self.assertEqual(
+            arguments["raw_response"],
+            invalid_response,
+        )
+        self.assertIsNotNone(arguments["error"])
 
 
 if __name__ == "__main__":

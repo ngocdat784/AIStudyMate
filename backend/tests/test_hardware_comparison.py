@@ -1,10 +1,11 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services import hardware_ai_service
 from app.services.hardware_service import compare_hardware_models
 
 
@@ -98,6 +99,208 @@ class HardwareComparisonTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "không có đủ dữ liệu hợp lệ"):
             compare_hardware_models(dataframe, "A", "B")
+
+    def test_comparison_ai_audit_records_success_and_raw_response(self):
+        comparison = {"models": {"model_a": {"production": 100}}}
+        raw_response = (
+            '{"summary": "So sánh hoàn tất.", '
+            '"investigation_points": ["Đối chiếu chất lượng."]}'
+        )
+        audit = Mock()
+        client = Mock()
+        client.models.generate_content.return_value = Mock(text=raw_response)
+        with (
+            patch.object(
+                hardware_ai_service,
+                "AIAuditContext",
+                return_value=audit,
+            ) as audit_context,
+            patch.object(hardware_ai_service, "get_client", return_value=client),
+            patch.object(
+                hardware_ai_service,
+                "call_gemini_with_retry",
+                side_effect=lambda operation: operation(),
+            ),
+        ):
+            result = hardware_ai_service.analyze_hardware_comparison(
+                comparison
+            )
+
+        audit_context.assert_called_once()
+        audit_kwargs = audit_context.call_args.kwargs
+        self.assertEqual(
+            audit_kwargs["analysis_type"],
+            "hardware_comparison",
+        )
+        self.assertEqual(
+            audit_kwargs["model_name"],
+            hardware_ai_service.GEMINI_MODEL,
+        )
+        self.assertEqual(
+            audit_kwargs["prompt_version"],
+            "hardware_comparison_v1",
+        )
+        self.assertEqual(audit_kwargs["input_data"], comparison)
+        self.assertEqual(
+            audit_kwargs["prompt_text"],
+            client.models.generate_content.call_args.kwargs["contents"],
+        )
+        audit.set_raw_response.assert_called_once_with(raw_response)
+        audit.succeed.assert_called_once_with(result)
+        self.assertEqual(result["summary"], "So sánh hoàn tất.")
+
+    def test_comparison_ai_error_is_audited_and_reraised(self):
+        error = RuntimeError("Gemini unavailable")
+        audit = Mock()
+        with (
+            patch.object(
+                hardware_ai_service,
+                "AIAuditContext",
+                return_value=audit,
+            ),
+            patch.object(
+                hardware_ai_service,
+                "call_gemini_with_retry",
+                side_effect=error,
+            ),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                hardware_ai_service.analyze_hardware_comparison({})
+
+        self.assertIs(raised.exception, error)
+        audit.fail.assert_called_once_with(error)
+        audit.set_raw_response.assert_not_called()
+        audit.succeed.assert_not_called()
+
+    def test_comparison_ai_invalid_response_is_audited_as_validation_failure(
+        self,
+    ):
+        raw_response = "invalid JSON"
+        audit = Mock()
+        with (
+            patch.object(
+                hardware_ai_service,
+                "AIAuditContext",
+                return_value=audit,
+            ),
+            patch.object(
+                hardware_ai_service,
+                "call_gemini_with_retry",
+                return_value=Mock(text=raw_response),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "Không thể xác thực nhận xét so sánh model",
+            ):
+                hardware_ai_service.analyze_hardware_comparison({})
+
+        audit.set_raw_response.assert_called_once_with(raw_response)
+        audit.fail.assert_called_once()
+        self.assertTrue(
+            audit.fail.call_args.kwargs["validation_failed"]
+        )
+        audit.succeed.assert_not_called()
+
+    def test_intervention_explanation_audit_records_success(self):
+        intervention_result = {"conclusion": "improved", "metrics": {}}
+        raw_response = (
+            '{"summary": "Kết quả được cải thiện.", '
+            '"investigation_points": ["Tiếp tục theo dõi."]}'
+        )
+        audit = Mock()
+        client = Mock()
+        client.models.generate_content.return_value = Mock(text=raw_response)
+        with (
+            patch.object(
+                hardware_ai_service,
+                "AIAuditContext",
+                return_value=audit,
+            ) as audit_context,
+            patch.object(hardware_ai_service, "get_client", return_value=client),
+            patch.object(
+                hardware_ai_service,
+                "call_gemini_with_retry",
+                side_effect=lambda operation: operation(),
+            ),
+        ):
+            result = hardware_ai_service.explain_hardware_intervention(
+                intervention_result
+            )
+
+        audit_context.assert_called_once()
+        audit_kwargs = audit_context.call_args.kwargs
+        self.assertEqual(
+            audit_kwargs["analysis_type"],
+            "hardware_intervention",
+        )
+        self.assertEqual(
+            audit_kwargs["model_name"],
+            hardware_ai_service.GEMINI_MODEL,
+        )
+        self.assertEqual(
+            audit_kwargs["prompt_version"],
+            "hardware_intervention_v1",
+        )
+        self.assertEqual(audit_kwargs["input_data"], intervention_result)
+        self.assertEqual(
+            audit_kwargs["prompt_text"],
+            client.models.generate_content.call_args.kwargs["contents"],
+        )
+        audit.set_raw_response.assert_called_once_with(raw_response)
+        audit.succeed.assert_called_once_with(result)
+        self.assertEqual(result["summary"], "Kết quả được cải thiện.")
+
+    def test_intervention_explanation_audits_gemini_error(self):
+        audit = Mock()
+        error = RuntimeError("Gemini unavailable")
+        with (
+            patch.object(
+                hardware_ai_service,
+                "AIAuditContext",
+                return_value=audit,
+            ),
+            patch.object(
+                hardware_ai_service,
+                "call_gemini_with_retry",
+                side_effect=error,
+            ),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                hardware_ai_service.explain_hardware_intervention({})
+
+        self.assertIs(raised.exception, error)
+        audit.fail.assert_called_once_with(error)
+        audit.set_raw_response.assert_not_called()
+        audit.succeed.assert_not_called()
+
+    def test_intervention_explanation_audits_validation_failure(self):
+        raw_response = "invalid JSON"
+        audit = Mock()
+        with (
+            patch.object(
+                hardware_ai_service,
+                "AIAuditContext",
+                return_value=audit,
+            ),
+            patch.object(
+                hardware_ai_service,
+                "call_gemini_with_retry",
+                return_value=Mock(text=raw_response),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "Không thể xác thực diễn giải can thiệp từ Gemini",
+            ):
+                hardware_ai_service.explain_hardware_intervention({})
+
+        audit.set_raw_response.assert_called_once_with(raw_response)
+        audit.fail.assert_called_once()
+        self.assertTrue(
+            audit.fail.call_args.kwargs["validation_failed"]
+        )
+        audit.succeed.assert_not_called()
 
     def test_compare_endpoint_returns_python_metrics_and_ai_analysis(self):
         client = TestClient(app)

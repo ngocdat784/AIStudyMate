@@ -1717,34 +1717,53 @@ def analyze_hardware_comparison(
         "cao hơn.\n\n"
         f"{json.dumps(comparison, ensure_ascii=False)}"
     )
-    response = call_gemini_with_retry(
-        lambda: get_client().models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": _gemini_response_schema(
-                    HardwareComparisonAnalysis
-                ),
-                "temperature": 0.2,
-            },
-        )
+    audit = AIAuditContext(
+        analysis_type="hardware_comparison",
+        model_name=GEMINI_MODEL,
+        prompt_version="hardware_comparison_v1",
+        input_data=comparison,
+        prompt_text=prompt,
     )
 
+    try:
+        response = call_gemini_with_retry(
+            lambda: get_client().models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config={
+                    "response_mime_type": "application/json",
+                    "response_schema": _gemini_response_schema(
+                        HardwareComparisonAnalysis
+                    ),
+                    "temperature": 0.2,
+                },
+            )
+        )
+    except Exception as exc:
+        audit.fail(exc)
+        raise
+
     response_text = getattr(response, "text", None)
+    audit.set_raw_response(response_text)
     if not response_text or not response_text.strip():
-        raise ValueError("Gemini không trả về nhận xét so sánh model.")
+        error = ValueError("Gemini không trả về nhận xét so sánh model.")
+        audit.fail(error, validation_failed=True)
+        raise error
 
     try:
         analysis = HardwareComparisonAnalysis.model_validate_json(
             response_text
         )
+        result = analysis.model_dump()
     except Exception as exc:
-        raise ValueError(
+        error = ValueError(
             "Không thể xác thực nhận xét so sánh model từ Gemini."
-        ) from exc
+        )
+        audit.fail(error, validation_failed=True)
+        raise error from exc
 
-    return analysis.model_dump()
+    audit.succeed(result)
+    return result
 
 
 def explain_hardware_intervention(
@@ -1760,32 +1779,53 @@ def explain_hardware_intervention(
         "Chỉ trả về summary và các điểm cần kiểm tra tiếp theo.\n\n"
         f"{json.dumps(result, ensure_ascii=False)}"
     )
-    response = call_gemini_with_retry(
-        lambda: get_client().models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": _gemini_response_schema(
-                    HardwareComparisonAnalysis
-                ),
-                "temperature": 0.2,
-            },
-        )
+    audit = AIAuditContext(
+        analysis_type="hardware_intervention",
+        model_name=GEMINI_MODEL,
+        prompt_version="hardware_intervention_v1",
+        input_data=result,
+        prompt_text=prompt,
     )
 
-    response_text = getattr(response, "text", None)
-    if not response_text or not response_text.strip():
-        raise ValueError("Gemini không trả về diễn giải can thiệp.")
     try:
+        response = call_gemini_with_retry(
+            lambda: get_client().models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config={
+                    "response_mime_type": "application/json",
+                    "response_schema": _gemini_response_schema(
+                        HardwareComparisonAnalysis
+                    ),
+                    "temperature": 0.2,
+                },
+            )
+        )
+    except Exception as exc:
+        audit.fail(exc)
+        raise
+
+    try:
+        response_text = getattr(response, "text", None)
+        audit.set_raw_response(response_text)
+        if not response_text or not response_text.strip():
+            raise ValueError(
+                "Gemini không trả về diễn giải can thiệp."
+            )
         analysis = HardwareComparisonAnalysis.model_validate_json(
             response_text
         )
+        validated_result = analysis.model_dump()
     except Exception as exc:
-        raise ValueError(
-            "Không thể xác thực diễn giải can thiệp từ Gemini."
-        ) from exc
-    return analysis.model_dump()
+        error = ValueError(
+            "Không thể xác thực diễn giải can thiệp từ Gemini: "
+            f"{str(exc)}"
+        )
+        audit.fail(error, validation_failed=True)
+        raise error from exc
+
+    audit.succeed(validated_result)
+    return validated_result
 
 
 def _build_hardware_trend_evidence(
@@ -2290,28 +2330,48 @@ def analyze_hardware_trends_with_ai(
         "- Mỗi evidence_ids phải tham chiếu ID tồn tại trong evidence.\n"
         "- Không tự tạo số liệu hoặc ID bằng chứng."
     )
-    response = call_gemini_with_retry(
-        lambda: get_client().models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_json_schema": _gemini_response_schema(
-                    HardwareTrendAnalysis
-                ),
-            },
-        )
+    audit = AIAuditContext(
+        analysis_type="hardware_trends",
+        model_name=GEMINI_MODEL,
+        prompt_version="hardware_trends_v1",
+        input_data=context,
+        prompt_text=prompt,
     )
 
-    response_text = response.text
-    if not response_text or not response_text.strip():
-        raise ValueError("Gemini trả về nội dung rỗng.")
-
-    logger.info("Gemini hardware trend response: %s", response_text)
     try:
+        response = call_gemini_with_retry(
+            lambda: get_client().models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config={
+                    "response_mime_type": "application/json",
+                    "response_json_schema": _gemini_response_schema(
+                        HardwareTrendAnalysis
+                    ),
+                },
+            )
+        )
+    except Exception as exc:
+        audit.fail(exc)
+        raise
+
+    response_text: str | None = None
+    try:
+        response_text = getattr(response, "text", None)
+        audit.set_raw_response(response_text)
+        if not response_text or not response_text.strip():
+            raise ValueError("Gemini trả về nội dung rỗng.")
+
+        logger.info("Gemini hardware trend response: %s", response_text)
         analysis = HardwareTrendAnalysis.model_validate_json(response_text)
         _validate_hardware_trend_analysis(analysis, evidence, report)
-    except Exception:
+        result = {
+            "title": "Phân tích xu hướng sản xuất",
+            **analysis.model_dump(mode="json"),
+            "evidence": evidence,
+        }
+    except Exception as exc:
+        audit.fail(exc, validation_failed=True)
         logger.exception(
             "Hardware trend validation failed. Response: %s",
             response_text,
@@ -2326,8 +2386,5 @@ def analyze_hardware_trends_with_ai(
         )
         raise
 
-    return {
-        "title": "Phân tích xu hướng sản xuất",
-        **analysis.model_dump(mode="json"),
-        "evidence": evidence,
-    }
+    audit.succeed(result)
+    return result

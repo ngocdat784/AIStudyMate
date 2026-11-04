@@ -401,10 +401,20 @@ class HardwareAnalysisTests(unittest.TestCase):
             "findings": {"model_quality_difference": {"detected": False}},
         }
 
-        with patch.object(
-            hardware_service,
-            "get_client",
-            return_value=client,
+        with (
+            patch.object(
+                hardware_service,
+                "get_client",
+                return_value=client,
+            ),
+            patch(
+                "app.services.ai_audit_context.start_ai_audit_log",
+                return_value=456,
+            ) as start_audit,
+            patch(
+                "app.services.ai_audit_context.finish_ai_audit_log",
+                return_value=True,
+            ) as finish_audit,
         ):
             analysis = hardware_service.generate_ai_insights(
                 source_kpis,
@@ -412,6 +422,26 @@ class HardwareAnalysisTests(unittest.TestCase):
             )
 
         prompt = client.interactions.create.call_args.kwargs["input"]
+        start_audit.assert_called_once_with(
+            analysis_type="hardware_insights",
+            model_name=hardware_service.GEMINI_MODEL,
+            prompt_version="hardware_insights_v1",
+            input_data={
+                "kpis": source_kpis,
+                "anomaly_analysis": anomalies,
+            },
+            prompt_text=prompt,
+        )
+        finish_audit.assert_called_once()
+        audit_args = finish_audit.call_args
+        self.assertEqual(audit_args.args[0], 456)
+        self.assertEqual(audit_args.kwargs["status"], "success")
+        self.assertEqual(audit_args.kwargs["validation_status"], "passed")
+        self.assertEqual(
+            audit_args.kwargs["raw_response"],
+            client.interactions.create.return_value.output_text,
+        )
+        self.assertIsInstance(audit_args.kwargs["validated_result"], dict)
         self.assertIn('"anomaly_analysis":', prompt)
         self.assertIn('"detected": false', prompt)
         self.assertIn(
@@ -1497,6 +1527,101 @@ class HardwareAnalysisTests(unittest.TestCase):
         )
         self.assertEqual(result["anomaly_analysis"], anomalies)
         self.assertEqual(result["ai_analysis"], {"risk_areas": []})
+
+    def test_hardware_insights_gemini_error_is_audited(self):
+        audit = Mock()
+        error = RuntimeError("Gemini API unavailable")
+        with (
+            patch.object(
+                hardware_service,
+                "AIAuditContext",
+                return_value=audit,
+            ),
+            patch.object(
+                hardware_service,
+                "call_gemini_with_retry",
+                side_effect=error,
+            ),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                hardware_service.generate_ai_insights(
+                    {"total_production": 100}
+                )
+
+        self.assertIs(raised.exception, error)
+        audit.fail.assert_called_once_with(error)
+        audit.set_raw_response.assert_not_called()
+        audit.succeed.assert_not_called()
+
+    def test_hardware_insights_empty_response_is_validation_failure(self):
+        audit = Mock()
+        interaction = Mock(output_text="")
+        with (
+            patch.object(
+                hardware_service,
+                "AIAuditContext",
+                return_value=audit,
+            ),
+            patch.object(
+                hardware_service,
+                "call_gemini_with_retry",
+                return_value=interaction,
+            ),
+        ):
+            with self.assertRaisesRegex(
+                Exception,
+                "Gemini không trả về Hardware Insights",
+            ):
+                hardware_service.generate_ai_insights(
+                    {"total_production": 100}
+                )
+
+        audit.set_raw_response.assert_called_once_with("")
+        audit.fail.assert_called_once()
+        error = audit.fail.call_args.args[0]
+        self.assertTrue(
+            audit.fail.call_args.kwargs["validation_failed"]
+        )
+        self.assertIn(
+            "Gemini không trả về Hardware Insights",
+            str(error),
+        )
+        audit.succeed.assert_not_called()
+
+    def test_hardware_insights_invalid_json_is_audited(self):
+        raw_response = "This is not valid JSON"
+        audit = Mock()
+        interaction = Mock(output_text=raw_response)
+        with (
+            patch.object(
+                hardware_service,
+                "AIAuditContext",
+                return_value=audit,
+            ),
+            patch.object(
+                hardware_service,
+                "call_gemini_with_retry",
+                return_value=interaction,
+            ),
+        ):
+            with self.assertRaisesRegex(
+                Exception,
+                "Gemini trả về Hardware Insights không hợp lệ",
+            ):
+                hardware_service.generate_ai_insights(
+                    {"total_production": 100}
+                )
+
+        audit.set_raw_response.assert_called_once_with(raw_response)
+        audit.fail.assert_called_once()
+        self.assertTrue(
+            audit.fail.call_args.kwargs["validation_failed"]
+        )
+        self.assertIn(
+            "Gemini trả về Hardware Insights không hợp lệ",
+            str(audit.fail.call_args.args[0]),
+        )
+        audit.succeed.assert_not_called()
 
 
 if __name__ == "__main__":

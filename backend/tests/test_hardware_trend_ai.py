@@ -140,9 +140,35 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
             patch(
                 "app.services.hardware_ai_service.logger.info"
             ) as log_response,
+            patch(
+                "app.services.hardware_ai_service.AIAuditContext"
+            ) as audit_context,
         ):
             result = analyze_hardware_trends_with_ai(report)
 
+        audit_context.assert_called_once()
+        audit = audit_context.return_value
+        audit_kwargs = audit_context.call_args.kwargs
+        self.assertEqual(
+            audit_kwargs["analysis_type"],
+            "hardware_trends",
+        )
+        self.assertEqual(
+            audit_kwargs["model_name"],
+            "gemini-3.5-flash-lite",
+        )
+        self.assertEqual(
+            audit_kwargs["prompt_version"],
+            "hardware_trends_v1",
+        )
+        self.assertEqual(audit_kwargs["input_data"]["granularity"], "day")
+        self.assertIn("evidence", audit_kwargs["input_data"])
+        self.assertEqual(
+            audit_kwargs["prompt_text"],
+            client.models.generate_content.call_args.kwargs["contents"],
+        )
+        audit.set_raw_response.assert_called_once_with(response.text)
+        audit.succeed.assert_called_once_with(result)
         self.assertEqual(result["title"], "Phân tích xu hướng sản xuất")
         self.assertEqual(result["summary"], _valid_ai_result()["summary"])
         self.assertIn("anomaly_0", result["evidence"])
@@ -216,6 +242,88 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
             "Gemini hardware trend response: %s",
             response.text,
         )
+
+    def test_analysis_audits_gemini_api_error(self):
+        audit = Mock()
+        error = RuntimeError("Gemini unavailable")
+
+        with (
+            patch(
+                "app.services.hardware_ai_service.AIAuditContext",
+                return_value=audit,
+            ),
+            patch(
+                "app.services.hardware_ai_service.call_gemini_with_retry",
+                side_effect=error,
+            ),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                analyze_hardware_trends_with_ai(_trend_report())
+
+        self.assertIs(raised.exception, error)
+        audit.fail.assert_called_once_with(error)
+        audit.set_raw_response.assert_not_called()
+        audit.succeed.assert_not_called()
+
+    def test_analysis_audits_empty_response_as_validation_failure(self):
+        audit = Mock()
+        response = Mock(text="")
+
+        with (
+            patch(
+                "app.services.hardware_ai_service.AIAuditContext",
+                return_value=audit,
+            ),
+            patch(
+                "app.services.hardware_ai_service.call_gemini_with_retry",
+                return_value=response,
+            ),
+            patch(
+                "app.services.hardware_ai_service.logger.exception"
+            ),
+            patch(
+                "app.services.hardware_ai_service.logger.error"
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "nội dung rỗng"):
+                analyze_hardware_trends_with_ai(_trend_report())
+
+        audit.set_raw_response.assert_called_once_with("")
+        audit.fail.assert_called_once()
+        self.assertTrue(
+            audit.fail.call_args.kwargs["validation_failed"]
+        )
+        audit.succeed.assert_not_called()
+
+    def test_analysis_audits_invalid_response_as_validation_failure(self):
+        audit = Mock()
+        raw_response = "{invalid json"
+
+        with (
+            patch(
+                "app.services.hardware_ai_service.AIAuditContext",
+                return_value=audit,
+            ),
+            patch(
+                "app.services.hardware_ai_service.call_gemini_with_retry",
+                return_value=Mock(text=raw_response),
+            ),
+            patch(
+                "app.services.hardware_ai_service.logger.exception"
+            ),
+            patch(
+                "app.services.hardware_ai_service.logger.error"
+            ),
+        ):
+            with self.assertRaises(ValidationError):
+                analyze_hardware_trends_with_ai(_trend_report())
+
+        audit.set_raw_response.assert_called_once_with(raw_response)
+        audit.fail.assert_called_once()
+        self.assertTrue(
+            audit.fail.call_args.kwargs["validation_failed"]
+        )
+        audit.succeed.assert_not_called()
 
     def test_gemini_schema_omits_unsupported_constraints(self):
         response = Mock(
