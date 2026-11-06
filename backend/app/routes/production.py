@@ -9,7 +9,7 @@ from app.services.production_service import (
 
 router = APIRouter(
     prefix="/api/production",
-    tags=["TextileAI - Production"],
+    tags=["Production Analysis"],
 )
 
 

@@ -1429,6 +1429,10 @@ class HardwareAnalysisTests(unittest.TestCase):
                 "analyze_hardware_deep",
                 side_effect=RuntimeError("503 service_unavailable"),
             ),
+            self.assertLogs(
+                hardware_service.logger,
+                level="WARNING",
+            ) as captured_logs,
         ):
             result = hardware_service.analyze_hardware_dataframe(
                 pd.DataFrame({"Production": [100]})
@@ -1439,6 +1443,13 @@ class HardwareAnalysisTests(unittest.TestCase):
         self.assertEqual(
             result["ai_analysis"]["ai_status"],
             "temporarily_unavailable",
+        )
+        self.assertTrue(
+            any(
+                "Hardware deep analysis AI request failed" in message
+                and "503 service_unavailable" in message
+                for message in captured_logs.output
+            )
         )
 
     def test_non_temporary_ai_error_is_not_suppressed(self):
@@ -1620,6 +1631,157 @@ class HardwareAnalysisTests(unittest.TestCase):
         self.assertIn(
             "Gemini trả về Hardware Insights không hợp lệ",
             str(audit.fail.call_args.args[0]),
+        )
+        audit.succeed.assert_not_called()
+
+    def test_hardware_insights_accepts_eleven_insights(self):
+        audit = Mock()
+        response_data = {
+            "title": "Hardware analysis",
+            "summary": "Phân tích dữ liệu.",
+            "kpis": [
+                {
+                    "name": "Tổng sản lượng",
+                    "value": 100,
+                    "unit": "sản phẩm",
+                    "description": "Sản lượng ghi nhận.",
+                }
+            ],
+            "insights": [f"Nhận định {index}" for index in range(11)],
+            "warnings": [],
+            "recommendations": ["Tiếp tục theo dõi dữ liệu."],
+        }
+        with (
+            patch.object(
+                hardware_service,
+                "AIAuditContext",
+                return_value=audit,
+            ),
+            patch.object(
+                hardware_service,
+                "call_gemini_with_retry",
+                return_value=Mock(
+                    output_text=json.dumps(
+                        response_data,
+                        ensure_ascii=False,
+                    )
+                ),
+            ),
+        ):
+            result = hardware_service.generate_ai_insights(
+                {"total_production": 100}
+            )
+
+        self.assertEqual(len(result.insights), 11)
+        self.assertEqual(result.insights[-1], "Nhận định 10")
+        audit.succeed.assert_called_once()
+        audit.fail.assert_not_called()
+
+    def test_custom_hardware_prompt_response_is_audited(self):
+        audit = Mock()
+        raw_response = "Sản lượng tăng nhưng dữ liệu chưa đủ để kết luận nguyên nhân."
+        interaction = Mock(output_text=raw_response)
+        report = {
+            "summary": "Đã phân tích.",
+            "kpis": [{"name": "Sản lượng", "value": 100}],
+        }
+        with (
+            patch.object(
+                hardware_service,
+                "AIAuditContext",
+                return_value=audit,
+            ) as audit_factory,
+            patch.object(
+                hardware_service,
+                "call_gemini_with_retry",
+                return_value=interaction,
+            ) as call_gemini,
+        ):
+            result = hardware_service.generate_custom_hardware_response(
+                report,
+                "Giải thích xu hướng sản lượng.",
+            )
+
+        self.assertEqual(result, raw_response)
+        audit_arguments = audit_factory.call_args.kwargs
+        self.assertEqual(
+            audit_arguments["analysis_type"],
+            "hardware_custom_prompt",
+        )
+        self.assertEqual(
+            audit_arguments["prompt_version"],
+            "hardware_custom_prompt_v1",
+        )
+        self.assertEqual(
+            audit_arguments["input_data"]["analysis_result"],
+            report,
+        )
+        self.assertEqual(
+            audit_arguments["input_data"]["custom_prompt"],
+            "Giải thích xu hướng sản lượng.",
+        )
+        self.assertIn(
+            "Giải thích xu hướng sản lượng.",
+            audit_arguments["prompt_text"],
+        )
+        self.assertTrue(callable(call_gemini.call_args.args[0]))
+        audit.set_raw_response.assert_called_once_with(raw_response)
+        audit.succeed.assert_called_once_with({"response": raw_response})
+        audit.fail.assert_not_called()
+
+    def test_custom_hardware_prompt_api_error_is_audited_and_reraised(self):
+        audit = Mock()
+        error = RuntimeError("Gemini API unavailable")
+        with (
+            patch.object(
+                hardware_service,
+                "AIAuditContext",
+                return_value=audit,
+            ),
+            patch.object(
+                hardware_service,
+                "call_gemini_with_retry",
+                side_effect=error,
+            ),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                hardware_service.generate_custom_hardware_response(
+                    {"summary": "Report"},
+                    "Tóm tắt dữ liệu.",
+                )
+
+        self.assertIs(raised.exception, error)
+        audit.fail.assert_called_once_with(error)
+        audit.set_raw_response.assert_not_called()
+        audit.succeed.assert_not_called()
+
+    def test_custom_hardware_prompt_empty_response_is_validation_failure(self):
+        audit = Mock()
+        with (
+            patch.object(
+                hardware_service,
+                "AIAuditContext",
+                return_value=audit,
+            ),
+            patch.object(
+                hardware_service,
+                "call_gemini_with_retry",
+                return_value=Mock(output_text=""),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "Gemini không trả về phản hồi cho prompt riêng",
+            ):
+                hardware_service.generate_custom_hardware_response(
+                    {"summary": "Report"},
+                    "Tóm tắt dữ liệu.",
+                )
+
+        audit.set_raw_response.assert_called_once_with("")
+        audit.fail.assert_called_once()
+        self.assertTrue(
+            audit.fail.call_args.kwargs["validation_failed"]
         )
         audit.succeed.assert_not_called()
 

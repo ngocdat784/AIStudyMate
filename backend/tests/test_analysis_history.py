@@ -1,10 +1,13 @@
+import io
 import unittest
 from datetime import datetime
 from typing import Iterator
 from unittest.mock import patch
 
 import pandas as pd
+from docx import Document
 from fastapi.testclient import TestClient
+from google.genai import errors
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -200,6 +203,193 @@ class AnalysisHistoryAPITests(unittest.TestCase):
             self.assertEqual(history.source_filename, "production.csv")
             self.assertEqual(history.summary, "Analysis summary.")
             self.assertEqual(history.result_data, analysis_result)
+
+    def test_hardware_api_returns_and_saves_python_fallback_on_gemini_503(self):
+        gemini_error = errors.APIError(
+            503,
+            {
+                "error": {
+                    "message": "model is temporarily unavailable",
+                }
+            },
+        )
+
+        with (
+            patch(
+                "app.services.hardware_service.generate_ai_insights",
+                side_effect=gemini_error,
+            ),
+            patch(
+                "app.services.hardware_service.analyze_hardware_deep",
+                side_effect=TimeoutError("Gemini request timed out"),
+            ),
+        ):
+            response = self.client.post(
+                "/api/hardware/analyze",
+                files={
+                    "file": (
+                        "production.csv",
+                        (
+                            "Date,Product,Model,Production,Defects,Downtime\n"
+                            "2026-10-01,Product A,Model A,100,2,5\n"
+                        ).encode(),
+                        "text/csv",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["ai_status"], "temporarily_unavailable")
+        self.assertEqual(
+            payload["ai_analysis"]["ai_status"],
+            "temporarily_unavailable",
+        )
+        self.assertEqual(payload["kpis"][0]["value"], 100)
+        self.assertEqual(
+            payload["ai_error"],
+            "Dịch vụ AI hiện tạm thời không khả dụng. "
+            "Các chỉ số được tính bằng Python vẫn có thể sử dụng.",
+        )
+        self.assertNotEqual(payload["ai_status"], "available")
+
+        with Session(self.engine) as session:
+            history = session.scalar(select(AnalysisHistory))
+            self.assertIsNotNone(history)
+            assert history is not None
+            self.assertEqual(history.analysis_type, "hardware_analysis")
+            self.assertEqual(history.result_data["ai_status"], "temporarily_unavailable")
+            self.assertEqual(history.result_data["kpis"][0]["value"], 100)
+
+    def test_hardware_analyze_adds_custom_prompt_response_after_analysis(self):
+        analysis_result = {
+            "title": "Hardware analysis",
+            "summary": "Analysis summary.",
+            "data_quality": {"quality_score": 95},
+        }
+        custom_response = "Ưu tiên theo dõi sản lượng trong các kỳ tiếp theo."
+
+        with (
+            patch(
+                "app.routes.hardware.analyze_hardware_dataframe",
+                return_value=analysis_result.copy(),
+            ),
+            patch(
+                "app.routes.hardware.generate_custom_hardware_response",
+                return_value=custom_response,
+            ) as custom_prompt,
+        ):
+            response = self.client.post(
+                "/api/hardware/analyze",
+                data={"custom_prompt": "Nên ưu tiên theo dõi điều gì?"},
+                files={
+                    "file": (
+                        "production.csv",
+                        b"Model,Production\nA,100\n",
+                        "text/csv",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["custom_prompt_response"],
+            custom_response,
+        )
+        custom_prompt.assert_called_once_with(
+            analysis_result,
+            "Nên ưu tiên theo dõi điều gì?",
+        )
+        with Session(self.engine) as session:
+            history = session.scalar(select(AnalysisHistory))
+            self.assertIsNotNone(history)
+            assert history is not None
+            self.assertEqual(
+                history.result_data["custom_prompt_response"],
+                custom_response,
+            )
+
+    def test_hardware_analyze_accepts_docx_table(self):
+        document = Document()
+        table = document.add_table(rows=2, cols=2)
+        for cell, value in zip(
+            table.rows[0].cells,
+            ("Product", "Production"),
+        ):
+            cell.text = value
+        for cell, value in zip(
+            table.rows[1].cells,
+            ("Laptop", "100"),
+        ):
+            cell.text = value
+        buffer = io.BytesIO()
+        document.save(buffer)
+        analysis_result = {
+            "title": "Hardware analysis",
+            "summary": "Analysis summary.",
+            "data_quality": {"quality_score": 95},
+        }
+
+        with patch(
+            "app.routes.hardware.analyze_hardware_dataframe",
+            return_value=analysis_result,
+        ) as analyze:
+            response = self.client.post(
+                "/api/hardware/analyze",
+                files={
+                    "file": (
+                        "production.docx",
+                        buffer.getvalue(),
+                        "application/vnd.openxmlformats-officedocument."
+                        "wordprocessingml.document",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), analysis_result)
+        dataframe = analyze.call_args.args[0]
+        self.assertEqual(dataframe.columns.tolist(), ["Product", "Production"])
+        self.assertEqual(dataframe.iloc[0]["Production"], "100")
+
+    def test_custom_prompt_failure_does_not_replace_main_analysis(self):
+        analysis_result = {
+            "title": "Hardware analysis",
+            "summary": "Analysis summary.",
+            "data_quality": {"quality_score": 95},
+        }
+
+        with (
+            patch(
+                "app.routes.hardware.analyze_hardware_dataframe",
+                return_value=analysis_result.copy(),
+            ),
+            patch(
+                "app.routes.hardware.generate_custom_hardware_response",
+                side_effect=RuntimeError("Gemini unavailable"),
+            ),
+            self.assertLogs("app.routes.hardware", level="ERROR"),
+        ):
+            response = self.client.post(
+                "/api/hardware/analyze",
+                data={"custom_prompt": "Tóm tắt."},
+                files={
+                    "file": (
+                        "production.csv",
+                        b"Model,Production\nA,100\n",
+                        "text/csv",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["summary"], "Analysis summary.")
+        self.assertEqual(
+            payload["custom_prompt_error"],
+            "Không thể tạo phản hồi theo prompt riêng. "
+            "Kết quả phân tích chính vẫn được giữ nguyên.",
+        )
 
     def test_hardware_compare_saves_result_with_ai_status(self):
         comparison_result = {

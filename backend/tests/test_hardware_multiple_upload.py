@@ -4,13 +4,17 @@ import unittest
 from unittest.mock import patch
 
 import pandas as pd
+from docx import Document
 from fastapi.testclient import TestClient
+from reportlab.pdfgen import canvas
 
 from app.main import app
 from app.routes.hardware import (
     MAX_FILE_SIZE,
     MAX_MULTIPLE_FILES,
     _read_csv_robust,
+    _read_docx_hardware_tables,
+    _read_pdf_hardware_tables,
 )
 
 
@@ -89,6 +93,58 @@ class HardwareMultipleUploadTests(unittest.TestCase):
         )
         self.assertEqual(dataframe.shape, (2, 5))
         self.assertEqual(dataframe.iloc[0]["Model"], "ProBook X1")
+        self.assertEqual(dataframe.iloc[1]["Production"], "200")
+
+    def test_docx_table_is_read_as_hardware_data(self):
+        document = Document()
+        table = document.add_table(rows=1, cols=3)
+        for cell, value in zip(
+            table.rows[0].cells,
+            ("Date", "Product", "Production"),
+        ):
+            cell.text = value
+        for row in (
+            ("2026-10-01", "Laptop", "100"),
+            ("2026-10-02", "Desktop", "200"),
+        ):
+            cells = table.add_row().cells
+            for cell, value in zip(cells, row):
+                cell.text = value
+
+        buffer = io.BytesIO()
+        document.save(buffer)
+        dataframe = _read_docx_hardware_tables(buffer.getvalue())
+
+        self.assertEqual(
+            dataframe.columns.tolist(),
+            ["Date", "Product", "Production"],
+        )
+        self.assertEqual(dataframe.shape, (2, 3))
+        self.assertEqual(dataframe.iloc[1]["Product"], "Desktop")
+        self.assertEqual(dataframe.iloc[1]["Production"], "200")
+
+    def test_pdf_table_is_read_as_hardware_data(self):
+        buffer = io.BytesIO()
+        pdf = canvas.Canvas(buffer)
+        pdf.drawString(40, 750, "Date")
+        pdf.drawString(180, 750, "Product")
+        pdf.drawString(330, 750, "Production")
+        pdf.drawString(40, 730, "2026-10-01")
+        pdf.drawString(180, 730, "Laptop")
+        pdf.drawString(330, 730, "100")
+        pdf.drawString(40, 710, "2026-10-02")
+        pdf.drawString(180, 710, "Desktop")
+        pdf.drawString(330, 710, "200")
+        pdf.save()
+
+        dataframe = _read_pdf_hardware_tables(buffer.getvalue())
+
+        self.assertEqual(
+            dataframe.columns.tolist(),
+            ["Date", "Product", "Production"],
+        )
+        self.assertEqual(dataframe.shape, (2, 3))
+        self.assertEqual(dataframe.iloc[0]["Product"], "Laptop")
         self.assertEqual(dataframe.iloc[1]["Production"], "200")
 
     def test_endpoint_prepares_csv_and_xlsx_separately_with_source_names(self):

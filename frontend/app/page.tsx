@@ -211,6 +211,8 @@ type HardwareResult = {
   data_processing: DataProcessing;
   anomaly_analysis: AnomalyAnalysis;
   ai_analysis: AIAnalysis;
+  custom_prompt_response?: string;
+  custom_prompt_error?: string;
 };
 
 type ComparedModel = {
@@ -716,6 +718,9 @@ export default function Home() {
   const [selectedFile, setSelectedFile] =
     useState<File | null>(null);
 
+  const [customPrompt, setCustomPrompt] =
+    useState("");
+
   const [result, setResult] =
     useState<HardwareResult | null>(null);
 
@@ -808,12 +813,12 @@ export default function Home() {
         ?.toLowerCase();
 
     if (
-      ![".csv", ".xlsx"].includes(
+      ![".csv", ".xlsx", ".pdf", ".docx"].includes(
         extension || ""
       )
     ) {
       setError(
-        "Chỉ hỗ trợ file CSV hoặc XLSX."
+        "Chỉ hỗ trợ file CSV, XLSX, PDF có bảng văn bản hoặc DOCX."
       );
 
       event.target.value = "";
@@ -1131,7 +1136,7 @@ export default function Home() {
 
     if (!selectedFile) {
       setError(
-        "Vui lòng chọn file CSV hoặc XLSX."
+        "Vui lòng chọn file dữ liệu."
       );
       return;
     }
@@ -1149,6 +1154,7 @@ export default function Home() {
         "file",
         selectedFile
       );
+      formData.append("custom_prompt", customPrompt);
 
       const response =
         await fetch(
@@ -1352,6 +1358,7 @@ export default function Home() {
 
   const handleClear = () => {
     setSelectedFile(null);
+    setCustomPrompt("");
     setResult(null);
     setExportError("");
     setComparison(null);
@@ -1573,7 +1580,7 @@ export default function Home() {
 
           <p>
             Upload dữ liệu sản xuất phần cứng
-            từ CSV hoặc Excel. HardwareAI sẽ
+            từ CSV, Excel, PDF có bảng văn bản hoặc Word (DOCX). HardwareAI sẽ
             tính toán KPI, phân tích sản phẩm,
             model, linh kiện, nhà cung cấp,
             lô sản xuất và tạo các nhận định
@@ -1648,7 +1655,7 @@ export default function Home() {
                 </strong>
 
                 <span>
-                  CSV hoặc XLSX · Max 10MB
+                  CSV, XLSX, PDF dạng bảng hoặc DOCX · Max 10MB
                 </span>
 
               </div>
@@ -1658,7 +1665,7 @@ export default function Home() {
             <input
               id="hardware-file"
               type="file"
-              accept=".csv,.xlsx"
+              accept=".csv,.xlsx,.pdf,.docx"
               onChange={
                 handleFileChange
               }
@@ -1698,6 +1705,22 @@ export default function Home() {
 
               </div>
             )}
+
+            <label className="custom-prompt-field">
+              <span>Prompt riêng (không bắt buộc)</span>
+              <input
+                type="text"
+                value={customPrompt}
+                onChange={(event) => setCustomPrompt(event.target.value)}
+                placeholder="Ví dụ: Tóm tắt các điểm cần ưu tiên cải thiện"
+                maxLength={2000}
+                disabled={loading || comparisonLoading}
+              />
+              <small>
+                Báo cáo phân tích chuẩn vẫn chạy trước; phản hồi cho prompt
+                riêng sẽ hiển thị bên dưới.
+              </small>
+            </label>
 
 
 
@@ -3097,6 +3120,34 @@ export default function Home() {
               />
 
             </section>
+
+            {(result.custom_prompt_response ||
+              result.custom_prompt_error) && (
+              <section className="ai-deep-analysis custom-prompt-answer">
+                <div className="ai-deep-header">
+                  <div>
+                    <div className="result-label">
+                      PHẢN HỒI THEO PROMPT RIÊNG
+                    </div>
+                    <h2>Phân tích theo yêu cầu của bạn</h2>
+                    <p>{customPrompt}</p>
+                  </div>
+                  <div className="ai-deep-badge">
+                    <span className="ai-deep-status-dot" />
+                    Gemini AI
+                  </div>
+                </div>
+                {result.custom_prompt_response ? (
+                  <p style={{ whiteSpace: "pre-wrap" }}>
+                    {result.custom_prompt_response}
+                  </p>
+                ) : (
+                  <p className="error-box">
+                    {result.custom_prompt_error}
+                  </p>
+                )}
+              </section>
+            )}
 
 
 

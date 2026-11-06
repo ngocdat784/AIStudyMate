@@ -3,9 +3,12 @@ import io
 import logging
 import math
 from datetime import date, datetime
+from pathlib import Path
+import re
 from typing import Any, Literal
 
 import pandas as pd
+from docx import Document
 from fastapi.encoders import jsonable_encoder
 from fastapi import (
     APIRouter,
@@ -18,6 +21,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import StreamingResponse
+from pypdf import PdfReader
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -31,6 +35,8 @@ from app.services.hardware_ai_service import (
 from app.services.hardware_service import (
     analyze_hardware_dataframe,
     compare_hardware_models,
+    find_column,
+    generate_custom_hardware_response,
 )
 from app.services.hardware_comparison_service import (
     ComparisonDimension,
@@ -212,18 +218,142 @@ def _read_csv_robust(content: bytes) -> pd.DataFrame:
     )
 
 
-async def _read_hardware_upload(file: UploadFile) -> pd.DataFrame:
+def _has_production_column(columns: list[str]) -> bool:
+    return find_column(
+        pd.DataFrame(columns=columns),
+        "production",
+    ) is not None
+
+
+def _read_docx_hardware_tables(content: bytes) -> pd.DataFrame:
+    try:
+        document = Document(io.BytesIO(content))
+    except Exception as error:
+        raise ValueError(
+            f"Không thể đọc file DOCX: {error}"
+        ) from error
+
+    frames = []
+    for table in document.tables:
+        rows = [
+            [cell.text.strip() for cell in row.cells]
+            for row in table.rows
+        ]
+        if len(rows) < 2:
+            continue
+
+        headers = rows[0]
+        if not _has_production_column(headers):
+            continue
+
+        dataframe = pd.DataFrame(
+            rows[1:],
+            columns=headers,
+        ).dropna(how="all")
+        if not dataframe.empty:
+            frames.append(dataframe)
+
+    if not frames:
+        raise ValueError(
+            "Không tìm thấy bảng DOCX có cột sản lượng."
+        )
+
+    return pd.concat(frames, ignore_index=True, sort=False)
+
+
+def _split_pdf_table_line(line: str) -> list[str]:
+    if "|" in line:
+        cells = re.split(r"\s*\|\s*", line.strip().strip("|"))
+    elif "\t" in line:
+        cells = line.split("\t")
+    else:
+        cells = re.split(r"\s{2,}", line.strip())
+    return [cell.strip() for cell in cells]
+
+
+def _read_pdf_hardware_tables(content: bytes) -> pd.DataFrame:
+    try:
+        reader = PdfReader(io.BytesIO(content))
+    except Exception as error:
+        raise ValueError(
+            f"Không thể đọc file PDF: {error}"
+        ) from error
+
+    frames = []
+    for page in reader.pages:
+        try:
+            page_text = page.extract_text(extraction_mode="layout") or ""
+        except Exception as error:
+            raise ValueError(
+                f"Không thể trích xuất bảng từ PDF: {error}"
+            ) from error
+
+        headers = None
+        rows = []
+        for line in page_text.splitlines():
+            cells = _split_pdf_table_line(line)
+            if len(cells) > 1 and _has_production_column(cells):
+                if headers and rows:
+                    frames.append(
+                        pd.DataFrame(rows, columns=headers)
+                    )
+                headers = cells
+                rows = []
+                continue
+
+            if headers is None:
+                continue
+
+            if len(cells) == len(headers) and any(cells):
+                if cells != headers:
+                    rows.append(cells)
+                continue
+
+            if rows:
+                frames.append(pd.DataFrame(rows, columns=headers))
+            headers = None
+            rows = []
+
+        if headers and rows:
+            frames.append(pd.DataFrame(rows, columns=headers))
+
+    if not frames:
+        raise ValueError(
+            "Không tìm thấy bảng dữ liệu phần cứng có thể đọc trong PDF. "
+            "PDF scan/ảnh cần được chuyển thành PDF có văn bản trước khi tải lên."
+        )
+
+    dataframe = pd.concat(frames, ignore_index=True, sort=False)
+    dataframe = dataframe.dropna(how="all")
+    if dataframe.empty:
+        raise ValueError("Bảng trong PDF không chứa dữ liệu.")
+    return dataframe
+
+
+async def _read_hardware_upload(
+    file: UploadFile,
+    *,
+    allow_documents: bool = False,
+) -> pd.DataFrame:
     if not file.filename:
         raise HTTPException(
             status_code=400,
             detail="Vui lòng chọn file dữ liệu.",
         )
 
-    extension = "." + file.filename.split(".")[-1].lower()
-    if extension not in [".csv", ".xlsx"]:
+    extension = Path(file.filename).suffix.lower()
+    supported_extensions = {".csv", ".xlsx"}
+    if allow_documents:
+        supported_extensions.update({".pdf", ".docx"})
+    if extension not in supported_extensions:
+        supported_formats = (
+            "CSV, XLSX, PDF có bảng văn bản hoặc DOCX"
+            if allow_documents
+            else "CSV hoặc XLSX"
+        )
         raise HTTPException(
             status_code=400,
-            detail="Chỉ hỗ trợ file CSV hoặc XLSX.",
+            detail=f"Chỉ hỗ trợ file {supported_formats}.",
         )
 
     content = await file.read()
@@ -261,7 +391,7 @@ async def _read_hardware_upload(file: UploadFile) -> pd.DataFrame:
             dataframe.columns.tolist(),
             dataframe.shape,
         )
-    else:
+    elif extension == ".xlsx":
         excel = pd.ExcelFile(
             io.BytesIO(content),
             engine="openpyxl",
@@ -282,6 +412,22 @@ async def _read_hardware_upload(file: UploadFile) -> pd.DataFrame:
             raise ValueError("File Excel không chứa dữ liệu.")
 
         dataframe = pd.concat(frames, ignore_index=True)
+    elif extension == ".docx":
+        try:
+            dataframe = _read_docx_hardware_tables(content)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail=str(error),
+            ) from error
+    else:
+        try:
+            dataframe = _read_pdf_hardware_tables(content)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail=str(error),
+            ) from error
 
     if dataframe.empty:
         raise HTTPException(
@@ -329,11 +475,31 @@ def _save_hardware_history_safely(
 @router.post("/analyze")
 async def analyze_hardware(
     file: UploadFile = File(...),
+    custom_prompt: str = Form(default="", max_length=2000),
     db: Session = Depends(get_db),
 ):
     try:
-        dataframe = await _read_hardware_upload(file)
+        dataframe = await _read_hardware_upload(
+            file,
+            allow_documents=True,
+        )
         response = analyze_hardware_dataframe(dataframe)
+        if custom_prompt.strip():
+            try:
+                response["custom_prompt_response"] = (
+                    generate_custom_hardware_response(
+                        dict(response),
+                        custom_prompt,
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "Hardware custom prompt response failed"
+                )
+                response["custom_prompt_error"] = (
+                    "Không thể tạo phản hồi theo prompt riêng. "
+                    "Kết quả phân tích chính vẫn được giữ nguyên."
+                )
         _save_hardware_history_safely(
             db,
             analysis_type="hardware_analysis",

@@ -2,8 +2,9 @@
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import ANY, Mock, patch
 
+from google.genai import errors
 from pydantic import ValidationError
 
 from app.services import ai_audit_context
@@ -144,6 +145,122 @@ class TestHardwareAIAudit(unittest.TestCase):
         )
 
         self.assertIsInstance(result, dict)
+
+    def test_audit_success_after_gemini_503_retry(self):
+        raw_response = self._valid_response_json()
+        client = SimpleNamespace(
+            models=SimpleNamespace(
+                generate_content=Mock(
+                    side_effect=[
+                        errors.APIError(
+                            503,
+                            {
+                                "error": {
+                                    "message": "temporarily unavailable",
+                                }
+                            },
+                        ),
+                        SimpleNamespace(text=raw_response),
+                    ]
+                )
+            )
+        )
+
+        with (
+            patch.object(service, "get_client", return_value=client),
+            patch("app.services.gemini_retry.time.sleep") as sleep,
+        ):
+            result = service.analyze_hardware_deep(
+                self.report,
+                anomalies={},
+            )
+
+        self.assertIsInstance(result, dict)
+        client.models.generate_content.assert_called_with(
+            model=service.GEMINI_MODEL,
+            contents="Test hardware analysis prompt",
+            config=ANY,
+        )
+        self.assertEqual(client.models.generate_content.call_count, 2)
+        sleep.assert_called_once()
+        self.finish_mock.assert_called_once()
+        self.assertEqual(
+            self.finish_mock.call_args.kwargs["status"],
+            "success",
+        )
+        self.assertEqual(
+            self.finish_mock.call_args.kwargs["validation_status"],
+            "passed",
+        )
+        self.assertEqual(
+            self.finish_mock.call_args.kwargs["raw_response"],
+            raw_response,
+        )
+
+    def test_audit_records_error_after_gemini_retries_exhausted(self):
+        error = errors.APIError(
+            503,
+            {"error": {"message": "temporarily unavailable"}},
+        )
+        client = SimpleNamespace(
+            models=SimpleNamespace(
+                generate_content=Mock(side_effect=error)
+            )
+        )
+
+        with (
+            patch.object(service, "get_client", return_value=client),
+            patch("app.services.gemini_retry.time.sleep") as sleep,
+        ):
+            with self.assertRaises(errors.APIError) as raised:
+                service.analyze_hardware_deep(
+                    self.report,
+                    anomalies={},
+                )
+
+        self.assertIs(raised.exception, error)
+        self.assertEqual(client.models.generate_content.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.finish_mock.assert_called_once()
+        audit_args = self.finish_mock.call_args
+        self.assertEqual(audit_args.kwargs["status"], "error")
+        self.assertEqual(
+            audit_args.kwargs["validation_status"],
+            "not_run",
+        )
+        self.assertIs(audit_args.kwargs["error"], error)
+        self.assertIsNone(audit_args.kwargs["raw_response"])
+        self.assertIsNone(audit_args.kwargs["validated_result"])
+
+    def test_ai_success_is_preserved_when_audit_storage_fails(self):
+        raw_response = self._valid_response_json()
+        self.start_mock.side_effect = RuntimeError(
+            "PostgreSQL unavailable during audit start"
+        )
+        self.finish_mock.side_effect = RuntimeError(
+            "PostgreSQL unavailable during audit finish"
+        )
+
+        with (
+            patch.object(
+                service,
+                "call_gemini_with_retry",
+                return_value=SimpleNamespace(text=raw_response),
+            ),
+            patch.object(ai_audit_context.logger, "exception"),
+        ):
+            result = service.analyze_hardware_deep(
+                self.report,
+                anomalies={},
+            )
+
+        self.assertIsInstance(result, dict)
+        self.assertEqual(
+            result["executive_summary"]["summary"],
+            "Phân tích dựa trên dữ liệu kiểm thử.",
+        )
+        self.start_mock.assert_called_once()
+        self.finish_mock.assert_called_once()
 
     def test_audit_gemini_error(self):
         gemini_error = RuntimeError(

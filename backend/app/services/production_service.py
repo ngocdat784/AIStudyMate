@@ -9,6 +9,7 @@ from google import genai
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.services.ai_audit_context import AIAuditContext
 
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
@@ -78,8 +79,8 @@ def get_client() -> Any:
 
 
 SYSTEM_INSTRUCTION = """
-You are TextileAI, an AI assistant specialized in
-textile and garment manufacturing.
+You are an AI assistant specialized in
+manufacturing and production operations.
 
 Your task is to analyze production KPIs calculated
 by Python from CSV/XLSX production data.
@@ -167,8 +168,8 @@ Focus on:
 - production consistency
 - areas requiring investigation
 
-Recommendations must be practical for textile
-and garment manufacturing operations.
+Recommendations must be practical for general manufacturing
+and production operations.
 
 Recommendations should normally suggest:
 
@@ -790,7 +791,7 @@ def generate_ai_insights(
 
     prompt = f"""
 Dưới đây là kết quả KPI đã được Python tính toán
-từ dữ liệu sản xuất của một doanh nghiệp dệt may.
+từ dữ liệu sản xuất của một doanh nghiệp.
 
 DỮ LIỆU KPI:
 
@@ -958,7 +959,7 @@ Ví dụ:
 =========================================================
 
 Đề xuất hành động thực tế cho môi trường
-sản xuất dệt may.
+sản xuất và vận hành.
 
 Có thể đề xuất:
 
@@ -1033,38 +1034,57 @@ Recommendations = hành động nên xem xét.
 Chỉ trả về JSON đúng với schema.
 """
 
-    interaction = get_client().interactions.create(
-        model=GEMINI_MODEL,
-        input=(
-            SYSTEM_INSTRUCTION
-            + "\n"
-            + prompt
-        ),
-        response_format={
-            "type": "text",
-            "mime_type": "application/json",
-            "schema": ProductionAnalysis.model_json_schema(),
-        },
+    full_prompt = (
+        SYSTEM_INSTRUCTION
+        + "\n"
+        + prompt
+    )
+    audit = AIAuditContext(
+        analysis_type="production_insights",
+        model_name=GEMINI_MODEL,
+        prompt_version="production_insights_v1",
+        input_data=kpis,
+        prompt_text=full_prompt,
     )
 
-    if not interaction.output_text:
+    try:
+        interaction = get_client().interactions.create(
+            model=GEMINI_MODEL,
+            input=full_prompt,
+            response_format={
+                "type": "text",
+                "mime_type": "application/json",
+                "schema": ProductionAnalysis.model_json_schema(),
+            },
+        )
+    except Exception as exc:
+        audit.fail(exc)
+        raise
 
-        raise Exception(
+    raw_response = interaction.output_text or ""
+    audit.set_raw_response(raw_response)
+
+    if not raw_response:
+        error = Exception(
             "Gemini không trả về Production Insights."
         )
+        audit.fail(error, validation_failed=True)
+        raise error
 
     try:
-
-        return ProductionAnalysis.model_validate_json(
-            interaction.output_text
+        analysis = ProductionAnalysis.model_validate_json(
+            raw_response
         )
-
-    except Exception as e:
-
-        raise Exception(
+    except Exception as exc:
+        error = Exception(
             "Gemini trả về Production Insights "
-            f"không hợp lệ: {str(e)}"
+            f"không hợp lệ: {str(exc)}"
         )
+        audit.fail(error, validation_failed=True)
+        raise error from exc
+
+    audit.succeed(analysis.model_dump())
+    return analysis
 
 
 # =========================================================

@@ -294,6 +294,41 @@ button {
   text-decoration: underline;
 }
 
+.custom-prompt-field {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.custom-prompt-field > span {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.custom-prompt-field input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #deddd8;
+  background: #fff;
+  font: inherit;
+}
+
+.custom-prompt-field small {
+  color: #777;
+  font-size: 12px;
+}
+
+.custom-prompt-answer {
+  padding: 22px;
+  border: 1px solid #deddd8;
+  background: #fff;
+}
+
+.custom-prompt-answer > p {
+  margin: 0;
+  line-height: 1.7;
+}
+
 .error-box {
   display: flex;
   gap: 12px;
