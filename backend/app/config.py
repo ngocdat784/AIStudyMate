@@ -9,6 +9,16 @@ class Settings(BaseSettings):
 
     # PostgreSQL
     DATABASE_URL: str | None = None
+    ALERT_AUTH_SECRET: str | None = None
+    ALERT_BOOTSTRAP_TOKEN: str | None = None
+    ALERT_SCHEDULER_ENABLED: bool = True
+    ALERT_SMTP_HOST: str | None = None
+    ALERT_SMTP_PORT: int = 587
+    ALERT_SMTP_USERNAME: str | None = None
+    ALERT_SMTP_PASSWORD: str | None = None
+    ALERT_SMTP_FROM: str | None = None
+    ALERT_SMTP_USE_TLS: bool = True
+    ALERT_WEBHOOK_URL: str | None = None
 
     # Data Quality
     HARDWARE_DATA_QUALITY_MIN_SCORE: float | None = Field(

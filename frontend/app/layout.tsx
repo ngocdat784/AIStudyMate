@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,7 +15,19 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="vi">
-      <body>{children}</body>
+      <body>
+        <nav
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            padding: "8px 20px",
+            borderBottom: "1px solid #e1e6ef",
+          }}
+        >
+          <Link href="/monitoring">Intelligent Monitoring</Link>
+        </nav>
+        {children}
+      </body>
     </html>
   );
 }
