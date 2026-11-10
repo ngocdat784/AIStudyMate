@@ -220,7 +220,7 @@ export default function ReportsPage() {
   const selectedStatus = selected?.version.approval_status;
 
   return (
-    <main style={{ maxWidth: 1050, margin: "32px auto", padding: 20, color: "#172033" }}>
+    <main className="reports-page">
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div><Link href="/">← Phân tích</Link><h1>Report Governance</h1></div>
         {user && <span>{user.display_name} · {user.role}</span>}

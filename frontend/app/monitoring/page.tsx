@@ -771,7 +771,7 @@ export default function MonitoringPage() {
 
   if (!token || !user) {
     return (
-      <main style={styles.page}>
+      <main className="monitoring-page" style={styles.page}>
         <section style={{ ...styles.panel, maxWidth: 480, margin: "8vh auto" }}>
           <Link href="/" style={{ color: "#2259bd" }}>← Về trang phân tích</Link>
           <h1>Intelligent Monitoring</h1>
@@ -809,7 +809,7 @@ export default function MonitoringPage() {
   }
 
   return (
-    <main style={styles.page}>
+    <main className="monitoring-page" style={styles.page}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <div>
           <Link href="/" style={{ color: "#2259bd" }}>← Về phân tích</Link>

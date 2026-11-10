@@ -38,7 +38,7 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <main style={{ maxWidth: 480, margin: "10vh auto", padding: 24 }}>
+    <main className="reset-password-page">
       <Link href="/monitoring">← Đăng nhập</Link>
       <h1>Đặt lại mật khẩu</h1>
       <form onSubmit={submit} style={{ display: "grid", gap: 12 }}>

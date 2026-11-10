@@ -4,9 +4,9 @@ import AuthNavigation from "./auth-navigation";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI StudyMate",
+  title: "HardwareAI — Phân tích dữ liệu sản xuất",
   description:
-    "AI-powered learning assistant for smarter studying",
+    "Phân tích KPI, chất lượng dữ liệu và xu hướng sản xuất với HardwareAI.",
 };
 
 export default function RootLayout({

@@ -1482,6 +1482,8 @@ export default function Home() {
     );
     if (
       !interactive ||
+      interactive.matches('a[href^="#"]') ||
+      interactive.closest(".prompt-section, .faq-section") ||
       interactive.closest(".upload-card:not(.multi-upload-card)")
     ) {
       return;
@@ -1490,6 +1492,14 @@ export default function Home() {
     event.preventDefault();
     event.stopPropagation();
     redirectToLogin();
+  }
+
+  function applyPromptTemplate(prompt: string) {
+    setCustomPrompt(prompt);
+    document.getElementById("file-analysis")?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
   }
 
   function guardProtectedSubmit(event: FormEvent<HTMLElement>) {
@@ -1523,42 +1533,6 @@ export default function Home() {
       <div className="dashboard-container">
 
         {/* -------------------------------- */}
-        {/* Header */}
-        {/* -------------------------------- */}
-
-        <header className="dashboard-topbar">
-
-          <div className="dashboard-brand">
-
-            <div className="brand-mark">
-              HW
-            </div>
-
-            <div>
-              <h1>HardwareAI</h1>
-
-              <span>
-                Hardware Intelligence
-              </span>
-            </div>
-
-          </div>
-
-          <div className="dashboard-topbar-actions">
-            <Link className="history-nav-link" href="/history">
-              Lịch sử phân tích
-            </Link>
-            <div className="system-status">
-              <span className="status-dot" />
-              Gemini AI
-            </div>
-          </div>
-
-        </header>
-
-
-
-        {/* -------------------------------- */}
         {/* Hero */}
         {/* -------------------------------- */}
 
@@ -1569,22 +1543,30 @@ export default function Home() {
           </div>
 
           <h2>
-            Understand your hardware
+            Biến dữ liệu sản xuất
             <br />
-            with{" "}
-            <span>
-              data-driven insights.
-            </span>
+            thành <span>quyết định rõ ràng.</span>
           </h2>
 
           <p>
-            Upload dữ liệu sản xuất phần cứng
-            từ CSV, Excel, PDF có bảng văn bản hoặc Word (DOCX). HardwareAI sẽ
-            tính toán KPI, phân tích sản phẩm,
-            model, linh kiện, nhà cung cấp,
-            lô sản xuất và tạo các nhận định
-            bằng AI.
+            Tải lên dữ liệu CSV, Excel, PDF hoặc Word để xem KPI, chất lượng,
+            xu hướng và các điểm cần ưu tiên trong quy trình sản xuất.
           </p>
+
+          <div className="hero-actions">
+            <a className="hero-primary-action" href="#file-analysis">
+              Bắt đầu phân tích <span aria-hidden="true">→</span>
+            </a>
+            <a className="hero-secondary-action" href="#available-tools">
+              Khám phá công cụ
+            </a>
+          </div>
+
+          <div className="hero-proof-row">
+            <span><strong>4</strong> định dạng dữ liệu</span>
+            <span><strong>22</strong> góc nhìn chuyên sâu</span>
+            <span><strong>Python</strong> tính KPI minh bạch</span>
+          </div>
 
         </section>
 
@@ -1594,7 +1576,7 @@ export default function Home() {
         {/* Upload */}
         {/* -------------------------------- */}
 
-        <section className="upload-card">
+        <section className="upload-card" id="file-analysis">
 
           <div className="section-heading">
 
@@ -1781,7 +1763,83 @@ export default function Home() {
 
         </section>
 
-        <section className="upload-card multi-upload-card">
+        <section
+          className="content-section available-tools-section"
+          id="available-tools"
+        >
+          <div className="content-section-heading">
+            <span className="content-eyebrow">CÔNG CỤ HARDWAREAI</span>
+            <h2>Một quy trình. Nhiều góc nhìn vận hành.</h2>
+            <p>
+              Từ dữ liệu gốc đến so sánh và báo cáo, các công cụ hiện có kết
+              nối trong cùng một luồng phân tích.
+            </p>
+          </div>
+          <div className="capability-grid">
+            <a className="capability-card capability-card-primary" href="#file-analysis">
+              <span className="capability-icon">01</span>
+              <span className="capability-status">SẴN SÀNG</span>
+              <h3>Phân tích tệp sản xuất</h3>
+              <p>
+                Tính sản lượng, lỗi, downtime, chất lượng dữ liệu và tạo nhận
+                định theo nội dung của bạn.
+              </p>
+              <span className="capability-link">Tải tệp lên <span aria-hidden="true">↗</span></span>
+            </a>
+            <a className="capability-card" href="#multi-file-analysis">
+              <span className="capability-icon">02</span>
+              <span className="capability-status">SẴN SÀNG</span>
+              <h3>Gộp nhiều tệp &amp; xu hướng</h3>
+              <p>
+                Kiểm tra chất lượng, hợp nhất dữ liệu và phân tích biến động
+                theo thời gian.
+              </p>
+              <span className="capability-link">Mở công cụ <span aria-hidden="true">↗</span></span>
+            </a>
+            <a className="capability-card" href="#file-analysis">
+              <span className="capability-icon">03</span>
+              <span className="capability-status">SẴN SÀNG</span>
+              <h3>So sánh model</h3>
+              <p>
+                Đối chiếu sản lượng, tỷ lệ lỗi và thời gian dừng giữa các model
+                trong cùng bộ dữ liệu.
+              </p>
+              <span className="capability-link">Tải dữ liệu trước <span aria-hidden="true">↗</span></span>
+            </a>
+            <Link className="capability-card" href="/history">
+              <span className="capability-icon">04</span>
+              <span className="capability-status">CẦN ĐĂNG NHẬP</span>
+              <h3>Lịch sử phân tích</h3>
+              <p>
+                Mở lại kết quả đã lưu, xem chi tiết và quản lý các lần phân
+                tích trước.
+              </p>
+              <span className="capability-link">Mở lịch sử <span aria-hidden="true">↗</span></span>
+            </Link>
+            <Link className="capability-card" href="/reports">
+              <span className="capability-icon">05</span>
+              <span className="capability-status">CẦN ĐĂNG NHẬP</span>
+              <h3>Báo cáo có kiểm soát</h3>
+              <p>
+                Soạn bản nháp từ kết quả, quản lý phiên bản và luồng duyệt báo
+                cáo.
+              </p>
+              <span className="capability-link">Mở báo cáo <span aria-hidden="true">↗</span></span>
+            </Link>
+            <Link className="capability-card" href="/monitoring">
+              <span className="capability-icon">06</span>
+              <span className="capability-status">CẦN ĐĂNG NHẬP</span>
+              <h3>Giám sát &amp; cảnh báo</h3>
+              <p>
+                Theo dõi chỉ số, thiết lập ngưỡng và quản lý cảnh báo cho nhà
+                máy.
+              </p>
+              <span className="capability-link">Mở giám sát <span aria-hidden="true">↗</span></span>
+            </Link>
+          </div>
+        </section>
+
+        <section className="upload-card multi-upload-card" id="multi-file-analysis">
           <div className="section-heading">
             <div>
               <span className="section-number">06</span>
@@ -2289,6 +2347,163 @@ export default function Home() {
           </section>
         )}
 
+        <section className="content-section use-cases-section">
+          <div className="content-section-heading">
+            <span className="content-eyebrow">ỨNG DỤNG TRONG VẬN HÀNH</span>
+            <h2>Câu hỏi thực tế, câu trả lời dựa trên dữ liệu.</h2>
+            <p>
+              Tập trung vào những chỉ số mà đội ngũ sản xuất cần theo dõi và
+              giải thích.
+            </p>
+          </div>
+          <div className="use-case-grid">
+            <article className="use-case-card">
+              <span>01 / CHẤT LƯỢNG</span>
+              <h3>Điều gì đang làm tỷ lệ lỗi tăng?</h3>
+              <p>
+                Phân tích tỷ lệ lỗi theo model, linh kiện, nhà cung cấp và lô
+                sản xuất.
+              </p>
+            </article>
+            <article className="use-case-card">
+              <span>02 / NĂNG SUẤT</span>
+              <h3>Sản lượng thay đổi ở đâu?</h3>
+              <p>
+                Theo dõi KPI theo ngày, xem biến động và nhận diện khoảng thời
+                gian cần kiểm tra.
+              </p>
+            </article>
+            <article className="use-case-card">
+              <span>03 / CAN THIỆP</span>
+              <h3>Cải tiến có tạo ra khác biệt?</h3>
+              <p>
+                Đối chiếu giai đoạn trước và sau can thiệp dựa trên sản lượng,
+                lỗi và downtime.
+              </p>
+            </article>
+            <article className="use-case-card">
+              <span>04 / ĐIỀU HÀNH</span>
+              <h3>Báo cáo nào cần được chú ý?</h3>
+              <p>
+                Lưu lại phân tích, theo dõi lịch sử và đưa kết quả vào luồng
+                quản lý báo cáo.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section className="workflow-section">
+          <div className="workflow-copy">
+            <span className="content-eyebrow">CÁCH BẮT ĐẦU</span>
+            <h2>Từ tệp dữ liệu đến kế hoạch hành động.</h2>
+            <p>
+              Không cần viết truy vấn. Chọn dữ liệu, xác định câu hỏi và kiểm
+              tra các kết quả có bằng chứng.
+            </p>
+          </div>
+          <ol className="workflow-steps">
+            <li>
+              <span>01</span>
+              <div><strong>Tải dữ liệu</strong><p>Chọn CSV, Excel, PDF hoặc DOCX.</p></div>
+            </li>
+            <li>
+              <span>02</span>
+              <div><strong>Kiểm tra &amp; phân tích</strong><p>Xem chất lượng dữ liệu, KPI và xu hướng.</p></div>
+            </li>
+            <li>
+              <span>03</span>
+              <div><strong>Chia sẻ kết quả</strong><p>Lưu lịch sử hoặc tạo báo cáo cho đội ngũ.</p></div>
+            </li>
+          </ol>
+        </section>
+
+        <section className="prompt-section">
+          <div className="content-section-heading">
+            <span className="content-eyebrow">GỢI Ý PROMPT</span>
+            <h2>Bắt đầu bằng một câu hỏi cụ thể.</h2>
+            <p>
+              Nêu rõ chỉ số, nhóm cần so sánh và khoảng thời gian để kết quả
+              tập trung hơn.
+            </p>
+          </div>
+          <div className="prompt-guidance-grid">
+            <article><span>01</span><strong>Chọn câu hỏi</strong><p>Bạn muốn tìm nguyên nhân, so sánh hay theo dõi xu hướng?</p></article>
+            <article><span>02</span><strong>Nêu phạm vi</strong><p>Chỉ rõ model, nhà cung cấp hoặc thời gian cần xem.</p></article>
+            <article><span>03</span><strong>Yêu cầu bằng chứng</strong><p>Đề nghị số liệu, giả định và các giới hạn dữ liệu.</p></article>
+          </div>
+          <div className="prompt-template-list">
+            {[
+              "Phân tích các yếu tố liên quan đến tỷ lệ lỗi theo model và nhà cung cấp; nêu số liệu hỗ trợ từng nhận định.",
+              "So sánh sản lượng và downtime theo ngày, chỉ ra những giai đoạn có thay đổi đáng chú ý.",
+              "Tóm tắt chất lượng dữ liệu, các giới hạn phân tích và những điểm cần xác minh trước khi ra quyết định.",
+            ].map((prompt) => (
+              <button
+                className="prompt-template"
+                key={prompt}
+                type="button"
+                onClick={() => applyPromptTemplate(prompt)}
+              >
+                <span>“{prompt}”</span>
+                <strong>Dùng gợi ý <span aria-hidden="true">↗</span></strong>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="future-section">
+          <div className="content-section-heading">
+            <span className="content-eyebrow">ĐANG ĐƯỢC PHÁT TRIỂN</span>
+            <h2>Những công cụ mới đang trên đường đến.</h2>
+            <p>
+              Một số khả năng chưa được hỗ trợ ở backend. Chúng tôi đang hoàn
+              thiện để có thể giới thiệu trong tương lai.
+            </p>
+          </div>
+          <div className="future-grid">
+            {[
+              ["Kết nối nguồn dữ liệu", "Đồng bộ tự động từ các hệ thống vận hành và kho dữ liệu."],
+              ["Lịch phân tích tự động", "Lên lịch chạy lại báo cáo khi có dữ liệu mới."],
+              ["Tùy chỉnh dashboard", "Tạo dashboard KPI theo vai trò và nhu cầu từng đội ngũ."],
+              ["Tài liệu trình bày", "Chuyển kết quả phân tích thành nội dung sẵn sàng chia sẻ."],
+            ].map(([title, description]) => (
+              <article className="future-card" key={title}>
+                <span className="future-badge">SẮP RA MẮT</span>
+                <h3>{title}</h3>
+                <p>{description}</p>
+                <span className="future-note">
+                  Tính năng đang trong quá trình phát triển. Hãy đón chờ trong
+                  tương lai.
+                </span>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="faq-section">
+          <div className="content-section-heading">
+            <span className="content-eyebrow">CÂU HỎI THƯỜNG GẶP</span>
+            <h2>Trước khi bạn bắt đầu.</h2>
+          </div>
+          <div className="faq-list">
+            <details>
+              <summary>HardwareAI nhận những định dạng tệp nào?</summary>
+              <p>Phân tích một tệp hỗ trợ CSV, XLSX, PDF có bảng văn bản và DOCX. Chức năng gộp nhiều tệp hiện hỗ trợ CSV và XLSX.</p>
+            </details>
+            <details>
+              <summary>Kết quả có thể lưu lại để xem sau không?</summary>
+              <p>Có. Đăng nhập để xem lịch sử phân tích, mở lại chi tiết và sử dụng các chức năng báo cáo.</p>
+            </details>
+            <details>
+              <summary>AI có tự quyết định KPI và cảnh báo không?</summary>
+              <p>Các KPI và điều kiện cảnh báo được hệ thống tính toán; phần AI hỗ trợ diễn giải kết quả và gợi ý nội dung cần kiểm tra.</p>
+            </details>
+            <details>
+              <summary>Tôi có thể yêu cầu phân tích theo câu hỏi riêng không?</summary>
+              <p>Có. Nhập câu hỏi trong phần phân tích tệp để bổ sung góc nhìn theo phạm vi bạn quan tâm.</p>
+            </details>
+          </div>
+        </section>
+
         {/* -------------------------------- */}
         {/* Loading */}
         {/* -------------------------------- */}
@@ -2400,7 +2615,10 @@ export default function Home() {
               )}
             </section>
 
-            <section className="dashboard-card model-comparison-card">
+            <section
+              className="dashboard-card model-comparison-card"
+              id="model-comparison"
+            >
               <div className="dashboard-card-header">
                 <div>
                   <span>02</span>

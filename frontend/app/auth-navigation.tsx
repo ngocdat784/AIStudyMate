@@ -83,7 +83,9 @@ export default function AuthNavigation() {
   return (
     <div className="site-navigation">
       <nav aria-label="Điều hướng chính">
-        <Link href="/monitoring">Monitoring</Link>
+        <Link href="/monitoring" onClick={handleProtectedNavigation}>
+          Giám sát
+        </Link>
         <Link href="/history" onClick={handleProtectedNavigation}>
           Lịch sử
         </Link>

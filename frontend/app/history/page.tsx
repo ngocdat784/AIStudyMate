@@ -588,13 +588,6 @@ export default function HistoryPage() {
 
       <div className="history-container">
         <header className="history-topbar">
-          <Link className="history-brand" href="/">
-            <span className="history-brand-mark">HW</span>
-            <span>
-              <strong>HardwareAI</strong>
-              <small>Analysis history</small>
-            </span>
-          </Link>
           <Link className="history-back-link" href="/">
             <span aria-hidden="true">←</span> Về trang phân tích
           </Link>
