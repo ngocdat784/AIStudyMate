@@ -7,6 +7,7 @@ from app.routes.production import router as production_router
 from app.routes.hardware import router as hardware_router
 from app.routes.history import router as history_router
 from app.routes.monitoring import router as monitoring_router
+from app.routes.reports import router as reports_router
 from app.config import settings
 from app.services.monitoring_scheduler import start_scheduler, stop_scheduler
 
@@ -44,6 +45,7 @@ app.include_router(production_router)
 app.include_router(hardware_router)
 app.include_router(history_router)
 app.include_router(monitoring_router)
+app.include_router(reports_router)
 
 @app.get("/")
 def root():

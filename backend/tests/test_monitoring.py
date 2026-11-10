@@ -5,7 +5,8 @@ from typing import Iterator
 from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, event, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -20,10 +21,15 @@ from app.models.monitoring import (
     AlertRule,
     AlertStatusHistory,
     AlertUser,
+    AlertUserFactory,
     AlertUserPlant,
+    Department,
     MonitoringDataset,
+    Organization,
+    Factory,
     Plant,
     ProductionLine,
+    UserActionAudit,
 )
 from app.services.monitoring_service import (
     ALERT_DELIVERY_LOCK_KEY,
@@ -153,8 +159,25 @@ class MonitoringPersistenceTests(unittest.TestCase):
                 role="operator",
             )
             self.plant = Plant(name="Plant A", timezone="UTC")
-            session.add_all([self.user, self.plant])
+            self.organization = Organization(name="Test Organization")
+            session.add_all([self.user, self.organization])
             session.flush()
+            self.factory = Factory(
+                name="Test Factory",
+                organization_id=self.organization.id,
+            )
+            session.add(self.factory)
+            session.flush()
+            self.plant.factory_id = self.factory.id
+            session.add(self.plant)
+            session.flush()
+            session.add(
+                AlertUserFactory(
+                    user_id=self.user.id,
+                    factory_id=self.factory.id,
+                    assigned_by=self.user.id,
+                )
+            )
             session.add(
                 AlertUserPlant(
                     user_id=self.user.id,
@@ -223,6 +246,54 @@ class MonitoringPersistenceTests(unittest.TestCase):
             settings.ALERT_SMTP_FROM,
             settings.ALERT_WEBHOOK_URL,
         ) = self.delivery_settings
+
+    def test_database_rejects_plant_department_from_another_factory(self):
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+
+        @event.listens_for(engine, "connect")
+        def enable_foreign_keys(dbapi_connection, _):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        try:
+            Base.metadata.create_all(engine)
+            with Session(engine) as session:
+                organization = Organization(name="Organization Test")
+                session.add(organization)
+                session.flush()
+                factory_a = Factory(
+                    name="Factory A",
+                    organization_id=organization.id,
+                )
+                factory_b = Factory(
+                    name="Factory B",
+                    organization_id=organization.id,
+                )
+                session.add_all([factory_a, factory_b])
+                session.flush()
+                department_a = Department(
+                    name="Department A",
+                    factory_id=factory_a.id,
+                )
+                session.add(department_a)
+                session.flush()
+                session.add(
+                    Plant(
+                        name="Plant B",
+                        factory_id=factory_b.id,
+                        department_id=department_a.id,
+                    )
+                )
+
+                with self.assertRaises(IntegrityError):
+                    session.flush()
+        finally:
+            engine.dispose()
 
     def _insert_alert(
         self,
@@ -737,6 +808,18 @@ class MonitoringAPITests(unittest.TestCase):
             poolclass=StaticPool,
         )
         Base.metadata.create_all(self.engine)
+        with Session(self.engine) as session:
+            organization = Organization(name="API Test Organization")
+            session.add(organization)
+            session.flush()
+            factory = Factory(
+                name="API Test Factory",
+                organization_id=organization.id,
+            )
+            session.add(factory)
+            session.commit()
+            self.organization_id = organization.id
+            self.factory_id = factory.id
 
         def override_get_db() -> Iterator[Session]:
             with Session(self.engine) as session:
@@ -794,7 +877,10 @@ class MonitoringAPITests(unittest.TestCase):
         denied = self.client.post(
             "/api/monitoring/plants",
             headers={"Authorization": f"Bearer {response.json()['access_token']}"},
-            json={"name": "Unauthorized"},
+            json={
+                "name": "Unauthorized",
+                "factory_id": self.factory_id,
+            },
         )
         self.assertEqual(denied.status_code, 403)
 
@@ -804,7 +890,11 @@ class MonitoringAPITests(unittest.TestCase):
         plant_response = self.client.post(
             "/api/monitoring/plants",
             headers=headers,
-            json={"name": "Upload Plant", "timezone": "UTC"},
+            json={
+                "name": "Upload Plant",
+                "timezone": "UTC",
+                "factory_id": self.factory_id,
+            },
         )
         self.assertEqual(plant_response.status_code, 201, plant_response.text)
         plant_id = plant_response.json()["id"]
@@ -895,7 +985,11 @@ class MonitoringAPITests(unittest.TestCase):
             response = self.client.post(
                 "/api/monitoring/plants",
                 headers=admin_headers,
-                json={"name": name, "timezone": "UTC"},
+                json={
+                    "name": name,
+                    "timezone": "UTC",
+                    "factory_id": self.factory_id,
+                },
             )
             self.assertEqual(response.status_code, 201, response.text)
             plants.append(response.json()["id"])
@@ -963,9 +1057,13 @@ class MonitoringAPITests(unittest.TestCase):
 
         for user_id in (operator_id, viewer_id):
             assigned = self.client.put(
-                f"/api/monitoring/users/{user_id}/plants",
+                f"/api/monitoring/users/{user_id}/organization-scope",
                 headers=admin_headers,
-                json={"plant_ids": [plant_a]},
+                json={
+                    "factory_ids": [self.factory_id],
+                    "department_ids": [],
+                    "plant_ids": [plant_a],
+                },
             )
             self.assertEqual(assigned.status_code, 200, assigned.text)
 
@@ -1072,6 +1170,17 @@ class MonitoringAPITests(unittest.TestCase):
             ).status_code,
             403,
         )
+        with Session(self.engine) as session:
+            denied_action = session.scalar(
+                select(UserActionAudit).where(
+                    UserActionAudit.actor_user_id == viewer_id,
+                    UserActionAudit.action == "access.denied",
+                    UserActionAudit.object_type == "api_route",
+                    UserActionAudit.object_id == f"/api/monitoring/alerts/{alert_id}",
+                    UserActionAudit.outcome == "denied",
+                )
+            )
+            self.assertIsNotNone(denied_action)
         self.assertEqual(
             self.client.patch(
                 f"/api/monitoring/alerts/{alert_id}",
@@ -1097,6 +1206,106 @@ class MonitoringAPITests(unittest.TestCase):
                 headers=operator_headers,
             ).status_code,
             403,
+        )
+
+    def test_multi_factory_department_assignments_enforce_hierarchy(self):
+        admin_token = self._create_admin()
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+        second_factory = self.client.post(
+            "/api/monitoring/factories",
+            headers=admin_headers,
+            json={
+                "organization_id": self.organization_id,
+                "name": "Second acceptance factory",
+            },
+        )
+        self.assertEqual(second_factory.status_code, 201, second_factory.text)
+        factory_b_id = second_factory.json()["id"]
+
+        department_a = self.client.post(
+            "/api/monitoring/departments",
+            headers=admin_headers,
+            json={"factory_id": self.factory_id, "name": "Department A"},
+        )
+        department_b = self.client.post(
+            "/api/monitoring/departments",
+            headers=admin_headers,
+            json={"factory_id": factory_b_id, "name": "Department B"},
+        )
+        self.assertEqual(department_a.status_code, 201, department_a.text)
+        self.assertEqual(department_b.status_code, 201, department_b.text)
+        department_a_id = department_a.json()["id"]
+        department_b_id = department_b.json()["id"]
+
+        plant_ids = []
+        for name, factory_id, department_id in (
+            ("Assigned A", self.factory_id, department_a_id),
+            ("Assigned B", factory_b_id, department_b_id),
+            ("Unassigned B", factory_b_id, department_b_id),
+        ):
+            plant = self.client.post(
+                "/api/monitoring/plants",
+                headers=admin_headers,
+                json={
+                    "name": name,
+                    "factory_id": factory_id,
+                    "department_id": department_id,
+                },
+            )
+            self.assertEqual(plant.status_code, 201, plant.text)
+            plant_ids.append(plant.json()["id"])
+
+        invalid_plant = self.client.post(
+            "/api/monitoring/plants",
+            headers=admin_headers,
+            json={
+                "name": "Cross-factory Department",
+                "factory_id": self.factory_id,
+                "department_id": department_b_id,
+            },
+        )
+        self.assertEqual(invalid_plant.status_code, 422)
+
+        operator = self.client.post(
+            "/api/monitoring/users",
+            headers=admin_headers,
+            json={
+                "email": "multi-scope-operator@example.test",
+                "password": "secure-test-password",
+                "display_name": "Multi-scope Operator",
+                "role": "operator",
+            },
+        )
+        self.assertEqual(operator.status_code, 201, operator.text)
+        operator_id = operator.json()["id"]
+        assigned = self.client.put(
+            f"/api/monitoring/users/{operator_id}/organization-scope",
+            headers=admin_headers,
+            json={
+                "factory_ids": [self.factory_id, factory_b_id],
+                "department_ids": [department_a_id, department_b_id],
+                "plant_ids": plant_ids[:2],
+            },
+        )
+        self.assertEqual(assigned.status_code, 200, assigned.text)
+        login = self.client.post(
+            "/api/monitoring/auth/login",
+            json={
+                "email": "multi-scope-operator@example.test",
+                "password": "secure-test-password",
+            },
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        operator_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        visible_plants = self.client.get(
+            "/api/monitoring/plants",
+            headers=operator_headers,
+        )
+        self.assertEqual(visible_plants.status_code, 200, visible_plants.text)
+        self.assertEqual(
+            {plant["id"] for plant in visible_plants.json()},
+            set(plant_ids[:2]),
         )
 
     def test_cannot_demote_or_deactivate_last_active_admin(self):
@@ -1133,7 +1342,11 @@ class MonitoringAPITests(unittest.TestCase):
         plant_response = self.client.post(
             "/api/monitoring/plants",
             headers=headers,
-            json={"name": "Promotion Plant", "timezone": "UTC"},
+            json={
+                "name": "Promotion Plant",
+                "timezone": "UTC",
+                "factory_id": self.factory_id,
+            },
         )
         self.assertEqual(plant_response.status_code, 201, plant_response.text)
         plant_id = plant_response.json()["id"]
@@ -1150,9 +1363,13 @@ class MonitoringAPITests(unittest.TestCase):
         self.assertEqual(user_response.status_code, 201, user_response.text)
         user_id = user_response.json()["id"]
         assigned = self.client.put(
-            f"/api/monitoring/users/{user_id}/plants",
+            f"/api/monitoring/users/{user_id}/organization-scope",
             headers=headers,
-            json={"plant_ids": [plant_id]},
+            json={
+                "factory_ids": [self.factory_id],
+                "department_ids": [],
+                "plant_ids": [plant_id],
+            },
         )
         self.assertEqual(assigned.status_code, 200, assigned.text)
 
@@ -1168,6 +1385,12 @@ class MonitoringAPITests(unittest.TestCase):
                 select(AlertUserPlant).where(AlertUserPlant.user_id == user_id)
             ).all()
             self.assertEqual(assignments, [])
+            factory_assignments = session.scalars(
+                select(AlertUserFactory).where(
+                    AlertUserFactory.user_id == user_id
+                )
+            ).all()
+            self.assertEqual(factory_assignments, [])
 
     def test_alert_lifecycle_history_and_resolution_timestamp(self):
         token = self._create_admin()
@@ -1175,7 +1398,11 @@ class MonitoringAPITests(unittest.TestCase):
         plant_response = self.client.post(
             "/api/monitoring/plants",
             headers=headers,
-            json={"name": "Lifecycle Plant", "timezone": "UTC"},
+            json={
+                "name": "Lifecycle Plant",
+                "timezone": "UTC",
+                "factory_id": self.factory_id,
+            },
         )
         plant_id = plant_response.json()["id"]
         self.client.post(

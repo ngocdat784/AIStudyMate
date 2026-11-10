@@ -1,16 +1,26 @@
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+import hashlib
 import io
+import logging
 import pandas as pd
+from sqlalchemy.orm import Session
 
+from app.database.connection import get_db
+from app.models.monitoring import AlertUser
+from app.services.analysis_history_service import create_analysis_history
+from app.services.monitoring_auth import get_current_user
 from app.services.production_service import (
     analyze_production_dataframe,
     calculate_production_kpis,
 )
+from app.services.monitoring_auth import require_roles
 
 router = APIRouter(
     prefix="/api/production",
     tags=["Production Analysis"],
+    dependencies=[Depends(require_roles("admin", "operator"))],
 )
+logger = logging.getLogger(__name__)
 
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -18,7 +28,9 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 
 @router.post("/analyze")
 async def analyze_production(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: AlertUser = Depends(get_current_user),
 ):
     if not file.filename:
         raise HTTPException(
@@ -167,6 +179,26 @@ async def analyze_production(
             )
         )
 
+        try:
+            create_analysis_history(
+                db,
+                analysis_type="production_analysis",
+                title="Phân tích dữ liệu sản xuất",
+                summary=(
+                    response.get("summary")
+                    if isinstance(response.get("summary"), str)
+                    else None
+                ),
+                source_filename=file.filename,
+                result_data=response,
+                creator_user_id=user.id,
+                source_file_sha256=hashlib.sha256(content).hexdigest(),
+                algorithm_version="production-kpi-v1",
+                ai_status=response.get("ai_status"),
+                evidence=response.get("evidence"),
+            )
+        except Exception:
+            logger.exception("Could not save production analysis lineage.")
         return response
 
     except HTTPException:

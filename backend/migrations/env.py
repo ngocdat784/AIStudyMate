@@ -16,12 +16,23 @@ from app.models import (  # noqa: F401
     AlertNotification,
     AlertRule,
     AlertStatusHistory,
+    AuthSession,
+    GovernedReport,
+    GovernedReportEdit,
+    GovernedReportVersion,
+    AlertUserDepartment,
+    AlertUserFactory,
     AlertUser,
     AlertUserPlant,
     AnalysisHistory,
+    Department,
+    Factory,
     MonitoringDataset,
+    Organization,
+    PasswordResetToken,
     Plant,
     ProductionLine,
+    UserActionAudit,
 )
 
 

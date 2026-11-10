@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
-from app.models import AnalysisHistory
+from app.models import AlertUser, AnalysisHistory
+from app.services.monitoring_auth import get_current_user, require_roles
 from app.services.analysis_history_service import (
     delete_analysis_history,
     get_analysis_history,
@@ -48,12 +49,14 @@ def get_history_list(
     page_size: int = Query(default=10, ge=1, le=100),
     analysis_type: str | None = Query(default=None, min_length=1),
     db: Session = Depends(get_db),
+    user: AlertUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     result = list_analysis_history(
         db,
         page=page,
         page_size=page_size,
         analysis_type=analysis_type,
+        creator_user_id=None if user.role == "admin" else user.id,
     )
     return {
         "items": [
@@ -73,6 +76,7 @@ def get_history_list(
 def get_history_detail(
     history_id: int,
     db: Session = Depends(get_db),
+    user: AlertUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     history = get_analysis_history(db, history_id)
     if history is None:
@@ -80,6 +84,8 @@ def get_history_detail(
             status_code=404,
             detail="Không tìm thấy lịch sử phân tích.",
         )
+    if user.role != "admin" and history.creator_user_id != user.id:
+        raise HTTPException(status_code=404, detail="Không tìm thấy lịch sử phân tích.")
     return _serialize_history(history, include_result=True)
 
 
@@ -87,7 +93,16 @@ def get_history_detail(
 def delete_history(
     history_id: int,
     db: Session = Depends(get_db),
+    user: AlertUser = Depends(require_roles("admin", "operator")),
 ) -> dict[str, Any]:
+    history = get_analysis_history(db, history_id)
+    if history is None or (
+        user.role != "admin" and history.creator_user_id != user.id
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="Không tìm thấy lịch sử phân tích.",
+        )
     deleted = delete_analysis_history(db, history_id)
     if not deleted:
         raise HTTPException(

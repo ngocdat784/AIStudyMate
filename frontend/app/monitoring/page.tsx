@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { AUTH_CHANGED_EVENT, notifyAuthChanged } from "../../lib/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -11,9 +12,19 @@ type User = {
   display_name: string;
   role: "admin" | "operator" | "viewer";
   email_notifications?: boolean;
+  is_active?: boolean;
+  account_status?: string;
 };
 
-type UserDirectoryItem = Pick<User, "id" | "display_name" | "role">;
+type UserDirectoryItem = Pick<User, "id" | "display_name" | "role" | "is_active" | "account_status">;
+type AuthSession = {
+  id: number;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  current: boolean;
+  user_agent: string | null;
+};
 type AlertHistoryItem = {
   id: number;
   event_type: string;
@@ -28,7 +39,17 @@ type Plant = {
   id: number;
   name: string;
   timezone: string;
+  factory_id?: number | null;
+  department_id?: number | null;
   lines: { id: number; name: string }[];
+};
+type Organization = { id: number; name: string };
+type Factory = { id: number; organization_id: number; name: string };
+type Department = { id: number; factory_id: number; name: string };
+type OrganizationScope = {
+  factory_ids: number[];
+  department_ids: number[];
+  plant_ids: number[];
 };
 
 type AlertItem = {
@@ -156,24 +177,32 @@ export default function MonitoringPage() {
     () => (typeof window === "undefined" ? "" : window.localStorage.getItem("monitoring-token") ?? ""),
   );
   const [user, setUser] = useState<User | null>(null);
-  const [authMode, setAuthMode] = useState<"login" | "signup" | "bootstrap">("login");
+  const [authMode, setAuthMode] = useState<"login" | "signup" | "bootstrap" | "forgot">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [bootstrapToken, setBootstrapToken] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [plants, setPlants] = useState<Plant[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [factories, setFactories] = useState<Factory[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [users, setUsers] = useState<UserDirectoryItem[]>([]);
+  const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [usersByPlant, setUsersByPlant] = useState<Record<number, UserDirectoryItem[]>>({});
   const [historyByAlert, setHistoryByAlert] = useState<Record<number, AlertHistoryItem[]>>({});
   const [targetUserId, setTargetUserId] = useState("");
   const [targetPlantIds, setTargetPlantIds] = useState<number[]>([]);
+  const [targetFactoryIds, setTargetFactoryIds] = useState<number[]>([]);
+  const [targetDepartmentIds, setTargetDepartmentIds] = useState<number[]>([]);
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserName, setNewUserName] = useState("");
   const [newUserPassword, setNewUserPassword] = useState("");
@@ -181,6 +210,12 @@ export default function MonitoringPage() {
   const [selectedPlant, setSelectedPlant] = useState("");
   const [selectedLine, setSelectedLine] = useState("");
   const [plantName, setPlantName] = useState("");
+  const [organizationName, setOrganizationName] = useState("");
+  const [factoryName, setFactoryName] = useState("");
+  const [departmentName, setDepartmentName] = useState("");
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
+  const [selectedFactoryId, setSelectedFactoryId] = useState("");
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState("");
   const [lineName, setLineName] = useState("");
   const [files, setFiles] = useState<FileList | null>(null);
   const [granularity, setGranularity] = useState("day");
@@ -197,6 +232,25 @@ export default function MonitoringPage() {
     [plants, selectedPlant],
   );
 
+  useEffect(() => {
+    const syncToken = () => {
+      const nextToken = window.localStorage.getItem("monitoring-token") ?? "";
+      setToken(nextToken);
+      if (!nextToken) {
+        setUser(null);
+        setPlants([]);
+        setAlerts([]);
+      }
+    };
+
+    window.addEventListener(AUTH_CHANGED_EVENT, syncToken);
+    window.addEventListener("storage", syncToken);
+    return () => {
+      window.removeEventListener(AUTH_CHANGED_EVENT, syncToken);
+      window.removeEventListener("storage", syncToken);
+    };
+  }, []);
+
   const request = useCallback(
     async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
       const response = await fetch(`${API_URL}${path}`, {
@@ -212,14 +266,62 @@ export default function MonitoringPage() {
         const detail = payload?.detail;
         throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail ?? response.statusText));
       }
+
       return payload as T;
     },
     [token],
   );
 
+  async function updateProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      const updated = await request<User>("/api/monitoring/auth/me", {
+        method: "PATCH",
+        body: JSON.stringify({ display_name: displayName.trim() || user?.display_name }),
+      });
+      setUser(updated);
+      setMessage("Đã cập nhật hồ sơ.");
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
+  }
+
+  async function changePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      await request("/api/monitoring/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      });
+      window.localStorage.removeItem("monitoring-token");
+      notifyAuthChanged();
+      setToken("");
+      setUser(null);
+      setError("Mật khẩu đã đổi; mọi phiên bị thu hồi. Hãy đăng nhập lại.");
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
+  }
+
+  async function revokeSession(session: AuthSession) {
+    try {
+      await request(`/api/monitoring/auth/sessions/${session.id}`, { method: "DELETE" });
+      if (session.current) {
+        signOut();
+      } else {
+        await refresh();
+      }
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
+  }
+
   const refresh = useCallback(async () => {
     if (!token) return;
-    const [plantData, datasetData, ruleData, alertData, notificationData, dashboardData, userData] =
+    const [plantData, datasetData, ruleData, alertData, notificationData, dashboardData, userData, organizationData, factoryData, departmentData, sessionData] =
       await Promise.all([
         request<Plant[]>("/api/monitoring/plants"),
         request<Dataset[]>("/api/monitoring/datasets"),
@@ -228,14 +330,24 @@ export default function MonitoringPage() {
         request<Notification[]>("/api/monitoring/notifications"),
         request<Dashboard>("/api/monitoring/dashboard"),
         request<UserDirectoryItem[]>("/api/monitoring/users"),
+        request<Organization[]>("/api/monitoring/organizations"),
+        request<Factory[]>("/api/monitoring/factories"),
+        request<Department[]>("/api/monitoring/departments"),
+        request<AuthSession[]>("/api/monitoring/auth/sessions"),
       ]);
     setPlants(plantData);
+    setOrganizations(organizationData);
+    setFactories(factoryData);
+    setDepartments(departmentData);
+    setSessions(sessionData);
     setDatasets(datasetData);
     setRules(ruleData);
     setAlerts(alertData);
     setNotifications(notificationData);
     setDashboard(dashboardData);
     setUsers(userData);
+    setSelectedOrganizationId((current) => current || String(organizationData[0]?.id ?? ""));
+    setSelectedFactoryId((current) => current || String(factoryData[0]?.id ?? ""));
     const userScopes = await Promise.all(
       [...new Set(alertData.map((alert) => alert.plant_id))].map(async (plantId) => [
         plantId,
@@ -243,8 +355,8 @@ export default function MonitoringPage() {
       ] as const),
     );
     setUsersByPlant(Object.fromEntries(userScopes));
-    if (!selectedPlant && plantData.length) setSelectedPlant(String(plantData[0].id));
-  }, [filterType, request, selectedPlant, token]);
+    setSelectedPlant((current) => current || String(plantData[0]?.id ?? ""));
+  }, [filterType, request, token]);
 
   useEffect(() => {
     if (!token) return;
@@ -253,6 +365,7 @@ export default function MonitoringPage() {
       .then(refresh)
       .catch((cause: Error) => {
         window.localStorage.removeItem("monitoring-token");
+        notifyAuthChanged();
         setToken("");
         setUser(null);
         setError(cause.message);
@@ -264,6 +377,14 @@ export default function MonitoringPage() {
     setError("");
     setMessage("");
     try {
+      if (authMode === "forgot") {
+        await request("/api/monitoring/auth/forgot-password", {
+          method: "POST",
+          body: JSON.stringify({ email }),
+        });
+        setMessage("Nếu tài khoản tồn tại, hướng dẫn đặt lại mật khẩu sẽ được gửi.");
+        return;
+      }
       const endpoint =
         authMode === "signup"
           ? "/api/monitoring/auth/signup"
@@ -273,7 +394,7 @@ export default function MonitoringPage() {
       const body = {
         email,
         password,
-        ...(authMode !== "login" ? { display_name: displayName } : {}),
+        ...(authMode === "signup" || authMode === "bootstrap" ? { display_name: displayName } : {}),
         ...(authMode === "bootstrap" ? { bootstrap_token: bootstrapToken } : {}),
       };
       const result = await request<{ access_token: string; user: User }>(endpoint, {
@@ -281,6 +402,7 @@ export default function MonitoringPage() {
         body: JSON.stringify(body),
       });
       window.localStorage.setItem("monitoring-token", result.access_token);
+      notifyAuthChanged();
       setToken(result.access_token);
       setUser(result.user);
       setMessage("Đăng nhập thành công.");
@@ -292,9 +414,17 @@ export default function MonitoringPage() {
   async function createPlant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
+      if (!selectedFactoryId) {
+        throw new Error("Hãy chọn Factory trước khi tạo Plant.");
+      }
       await request("/api/monitoring/plants", {
         method: "POST",
-        body: JSON.stringify({ name: plantName, timezone: "Asia/Ho_Chi_Minh" }),
+        body: JSON.stringify({
+          name: plantName,
+          timezone: "Asia/Ho_Chi_Minh",
+          factory_id: Number(selectedFactoryId),
+          department_id: selectedDepartmentId ? Number(selectedDepartmentId) : null,
+        }),
       });
       setPlantName("");
       await refresh();
@@ -305,8 +435,10 @@ export default function MonitoringPage() {
 
   async function loadUserPlants(userId: number) {
     try {
-      const assigned = await request<Plant[]>(`/api/monitoring/users/${userId}/plants`);
-      setTargetPlantIds(assigned.map((plant) => plant.id));
+      const assigned = await request<OrganizationScope>(`/api/monitoring/users/${userId}/organization-scope`);
+      setTargetPlantIds(assigned.plant_ids);
+      setTargetFactoryIds(assigned.factory_ids);
+      setTargetDepartmentIds(assigned.department_ids);
     } catch (cause) {
       setError((cause as Error).message);
     }
@@ -345,6 +477,8 @@ export default function MonitoringPage() {
       });
       setTargetUserId(String(created.id));
       setTargetPlantIds([]);
+      setTargetFactoryIds([]);
+      setTargetDepartmentIds([]);
       setNewUserEmail("");
       setNewUserName("");
       setNewUserPassword("");
@@ -358,14 +492,74 @@ export default function MonitoringPage() {
   async function saveUserPlants() {
     if (!targetUserId) return;
     try {
-      await request(`/api/monitoring/users/${targetUserId}/plants`, {
+      await request(`/api/monitoring/users/${targetUserId}/organization-scope`, {
         method: "PUT",
-        body: JSON.stringify({ plant_ids: targetPlantIds }),
+        body: JSON.stringify({
+          factory_ids: targetFactoryIds,
+          department_ids: targetDepartmentIds,
+          plant_ids: targetPlantIds,
+        }),
       });
       await refresh();
-      setMessage("Đã cập nhật Plant access. Quyền có hiệu lực ngay, không cần cấp token mới.");
+      setMessage("Đã cập nhật Factory/Department/Plant access; quyền có hiệu lực ngay.");
     } catch (cause) {
       setError((cause as Error).message);
+    }
+  }
+
+  async function createOrganization(event: FormEvent<HTMLFormElement>) {
+      event.preventDefault();
+      try {
+        const created = await request<Organization>("/api/monitoring/organizations", {
+          method: "POST",
+          body: JSON.stringify({ name: organizationName }),
+        });
+        setOrganizationName("");
+        setSelectedOrganizationId(String(created.id));
+        setSelectedFactoryId("");
+        setSelectedDepartmentId("");
+        await refresh();
+        setSelectedFactoryId("");
+      } catch (cause) {
+        setError((cause as Error).message);
+      }
+  }
+
+  async function createFactory(event: FormEvent<HTMLFormElement>) {
+      event.preventDefault();
+      try {
+        if (!selectedOrganizationId) throw new Error("Hãy chọn Organization.");
+        const created = await request<Factory>("/api/monitoring/factories", {
+          method: "POST",
+          body: JSON.stringify({
+            organization_id: Number(selectedOrganizationId),
+            name: factoryName,
+          }),
+        });
+        setFactoryName("");
+        setSelectedFactoryId(String(created.id));
+        await refresh();
+      } catch (cause) {
+        setError((cause as Error).message);
+      }
+  }
+
+  async function createDepartment(event: FormEvent<HTMLFormElement>) {
+      event.preventDefault();
+      try {
+        if (!selectedFactoryId) throw new Error("Hãy chọn Factory.");
+        const created = await request<Department>("/api/monitoring/departments", {
+          method: "POST",
+          body: JSON.stringify({
+            factory_id: Number(selectedFactoryId),
+            name: departmentName,
+          }),
+        });
+        setDepartmentName("");
+        setSelectedDepartmentId(String(created.id));
+        await refresh();
+      } catch (cause) {
+        setError((cause as Error).message);
     }
   }
 
@@ -568,6 +762,7 @@ export default function MonitoringPage() {
 
   function signOut() {
     window.localStorage.removeItem("monitoring-token");
+    notifyAuthChanged();
     setToken("");
     setUser(null);
     setPlants([]);
@@ -582,27 +777,27 @@ export default function MonitoringPage() {
           <h1>Intelligent Monitoring</h1>
           <p>Đăng nhập để quản lý nhà máy, ngưỡng và cảnh báo.</p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-            {(["login", "signup", "bootstrap"] as const).map((mode) => (
+            {(["login", "signup", "bootstrap", "forgot"] as const).map((mode) => (
               <button
                 key={mode}
                 type="button"
                 style={{ ...styles.button, background: authMode === mode ? "#2259bd" : "#6b778b" }}
                 onClick={() => setAuthMode(mode)}
               >
-                {mode === "login" ? "Đăng nhập" : mode === "signup" ? "Đăng ký viewer" : "Khởi tạo admin"}
+                {mode === "login" ? "Đăng nhập" : mode === "signup" ? "Đăng ký viewer" : mode === "bootstrap" ? "Khởi tạo admin" : "Quên mật khẩu"}
               </button>
             ))}
           </div>
           <form onSubmit={submitAuth} style={{ display: "grid", gap: 12 }}>
-            {authMode !== "login" && (
+            {(authMode === "signup" || authMode === "bootstrap") && (
               <label>Tên hiển thị<input required value={displayName} onChange={(event) => setDisplayName(event.target.value)} style={styles.input} /></label>
             )}
             <label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} style={styles.input} /></label>
-            <label>Mật khẩu (tối thiểu 12 ký tự)<input required type="password" minLength={12} autoComplete={authMode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} style={styles.input} /></label>
+            {authMode !== "forgot" && <label>Mật khẩu (tối thiểu 12 ký tự)<input required type="password" minLength={12} autoComplete={authMode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} style={styles.input} /></label>}
             {authMode === "bootstrap" && (
               <label>Bootstrap token<input required type="password" value={bootstrapToken} onChange={(event) => setBootstrapToken(event.target.value)} style={styles.input} /></label>
             )}
-            <button style={styles.button}>{authMode === "login" ? "Đăng nhập" : authMode === "signup" ? "Tạo tài khoản viewer" : "Tạo admin đầu tiên"}</button>
+            <button style={styles.button}>{authMode === "login" ? "Đăng nhập" : authMode === "signup" ? "Tạo tài khoản viewer" : authMode === "bootstrap" ? "Tạo admin đầu tiên" : "Gửi liên kết đặt lại"}</button>
           </form>
           <p style={{ color: "#68758a", fontSize: 13 }}>
             Đăng ký công khai chỉ cấp quyền viewer. Admin đầu tiên cần ALERT_BOOTSTRAP_TOKEN; đặt ALERT_AUTH_SECRET tối thiểu 32 ký tự ở backend.
@@ -621,10 +816,27 @@ export default function MonitoringPage() {
           <h1 style={{ marginBottom: 4 }}>Intelligent Monitoring</h1>
           <span>{user.display_name} · {user.role}</span>
         </div>
-        <button style={{ ...styles.button, background: "#526176" }} onClick={signOut}>Đăng xuất</button>
       </header>
       {error && <p role="alert" style={{ color: "#b42318", ...styles.panel }}>{error}</p>}
       {message && <p role="status" style={{ color: "#126b3a", ...styles.panel }}>{message}</p>}
+
+      <section style={{ ...styles.panel, margin: "16px 0" }}>
+        <h2>Tài khoản và phiên đăng nhập</h2>
+        <form onSubmit={updateProfile} style={{ display: "flex", gap: 8, maxWidth: 520 }}>
+          <label style={{ flex: 1 }}>Tên hiển thị<input required value={displayName || user.display_name} onChange={(event) => setDisplayName(event.target.value)} style={styles.input} /></label>
+          <button style={styles.button}>Lưu hồ sơ</button>
+        </form>
+        <form onSubmit={changePassword} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+          <label>Mật khẩu hiện tại<input required minLength={12} type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} style={styles.input} /></label>
+          <label>Mật khẩu mới<input required minLength={12} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} style={styles.input} /></label>
+          <button style={styles.button}>Đổi mật khẩu và đăng xuất phiên</button>
+        </form>
+        <h3>Phiên đang hoạt động</h3>
+        <ul>{sessions.map((session) => <li key={session.id}>
+          {session.current ? "Phiên hiện tại" : "Phiên khác"} · {session.user_agent ?? "Client không xác định"} · hết hạn {new Date(session.expires_at).toLocaleString()}
+          <button type="button" onClick={() => void revokeSession(session)}>Thu hồi</button>
+        </li>)}</ul>
+      </section>
 
       {dashboard && (
         <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, margin: "20px 0" }}>
@@ -652,13 +864,43 @@ export default function MonitoringPage() {
       </section>
 
       <section style={{ ...styles.panel, marginBottom: 16 }}>
-        <h2>Nhà máy và dây chuyền</h2>
+        <h2>Organization → Factory → Department / Plant → Production Line</h2>
         {canOperate && (
           <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-            {user.role === "admin" && <form onSubmit={createPlant} style={{ display: "flex", gap: 8 }}>
-              <input aria-label="Tên nhà máy" placeholder="Tên nhà máy" required value={plantName} onChange={(event) => setPlantName(event.target.value)} style={styles.input} />
-              <button style={styles.button}>Tạo nhà máy</button>
-            </form>}
+            {user.role === "admin" && <>
+              <form onSubmit={createOrganization} style={{ display: "flex", gap: 8 }}>
+                <input aria-label="Tên Organization" placeholder="Tên Organization" required value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} style={styles.input} />
+                <button style={styles.button}>Tạo Organization</button>
+              </form>
+              <form onSubmit={createFactory} style={{ display: "flex", gap: 8 }}>
+                <select required value={selectedOrganizationId} onChange={(event) => { setSelectedOrganizationId(event.target.value); setSelectedFactoryId(""); setSelectedDepartmentId(""); }} style={styles.input}>
+                  <option value="">Chọn Organization</option>
+                  {organizations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+                <input aria-label="Tên Factory" placeholder="Tên Factory" required value={factoryName} onChange={(event) => setFactoryName(event.target.value)} style={styles.input} />
+                <button disabled={!selectedOrganizationId} style={styles.button}>Tạo Factory</button>
+              </form>
+              <form onSubmit={createDepartment} style={{ display: "flex", gap: 8 }}>
+                <input aria-label="Tên Department" placeholder="Tên Department" required value={departmentName} onChange={(event) => setDepartmentName(event.target.value)} style={styles.input} />
+                <button disabled={!selectedFactoryId} style={styles.button}>Tạo Department</button>
+              </form>
+              <form onSubmit={createPlant} style={{ display: "flex", gap: 8 }}>
+                <input aria-label="Tên nhà máy" placeholder="Tên nhà máy" required value={plantName} onChange={(event) => setPlantName(event.target.value)} style={styles.input} />
+                <button disabled={!selectedFactoryId} style={styles.button}>Tạo Plant</button>
+              </form>
+              <label>Factory cho Department/Plant
+                <select value={selectedFactoryId} onChange={(event) => { setSelectedFactoryId(event.target.value); setSelectedDepartmentId(""); }} style={styles.input}>
+                  <option value="">Chọn Factory</option>
+                  {factories.filter((item) => !selectedOrganizationId || item.organization_id === Number(selectedOrganizationId)).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </label>
+              <label>Department của Plant (tùy chọn)
+                <select value={selectedDepartmentId} onChange={(event) => setSelectedDepartmentId(event.target.value)} style={styles.input}>
+                  <option value="">Không thuộc Department</option>
+                  {departments.filter((item) => item.factory_id === Number(selectedFactoryId)).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </label>
+            </>}
             <form onSubmit={createLine} style={{ display: "flex", gap: 8 }}>
               <input aria-label="Tên dây chuyền" placeholder="Tên dây chuyền" required value={lineName} onChange={(event) => setLineName(event.target.value)} style={styles.input} />
               <button disabled={!selectedPlant} style={styles.button}>Thêm dây chuyền</button>
@@ -688,12 +930,18 @@ export default function MonitoringPage() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12, marginTop: 16 }}>
             <label>Chọn người dùng<select value={targetUserId} onChange={(event) => { setTargetUserId(event.target.value); setTargetPlantIds([]); if (event.target.value) void loadUserPlants(Number(event.target.value)); }} style={styles.input}><option value="">Chọn operator/viewer</option>{users.filter((item) => item.role !== "admin").map((item) => <option key={item.id} value={item.id}>{item.display_name} ({item.role})</option>)}</select></label>
             {targetUserId && <label>Vai trò<select value={users.find((item) => item.id === Number(targetUserId))?.role ?? "viewer"} onChange={(event) => void updateManagedUser(Number(targetUserId), { role: event.target.value as User["role"] })} style={styles.input}><option value="operator">Operator</option><option value="viewer">Viewer</option></select></label>}
+            {targetUserId && <label>Trạng thái tài khoản<select value={users.find((item) => item.id === Number(targetUserId))?.is_active === false ? "inactive" : "active"} onChange={(event) => void updateManagedUser(Number(targetUserId), { is_active: event.target.value === "active" })} style={styles.input}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>}
           </div>
           {targetUserId && <fieldset style={{ border: "1px solid #d5dce7", borderRadius: 8, marginTop: 12 }}>
-            <legend>Nhà máy được cấp</legend>
+            <legend>Phạm vi Factory / Department / Plant (cần cấp đủ cấp tổ chức)</legend>
+            <strong>Factory</strong>
+            {factories.map((factory) => <label key={factory.id} style={{ display: "block", padding: 4 }}><input type="checkbox" checked={targetFactoryIds.includes(factory.id)} onChange={(event) => setTargetFactoryIds((current) => event.target.checked ? [...current, factory.id] : current.filter((id) => id !== factory.id))} /> {factory.name}</label>)}
+            <strong>Department</strong>
+            {departments.map((department) => <label key={department.id} style={{ display: "block", padding: 4 }}><input type="checkbox" checked={targetDepartmentIds.includes(department.id)} onChange={(event) => setTargetDepartmentIds((current) => event.target.checked ? [...current, department.id] : current.filter((id) => id !== department.id))} /> {department.name}</label>)}
+            <strong>Plant</strong>
             {plants.map((plant) => <label key={plant.id} style={{ display: "block", padding: 4 }}><input type="checkbox" checked={targetPlantIds.includes(plant.id)} onChange={(event) => setTargetPlantIds((current) => event.target.checked ? [...current, plant.id] : current.filter((id) => id !== plant.id))} /> {plant.name}</label>)}
-            {!plants.length && <p>Tạo nhà máy trước khi cấp quyền.</p>}
-            <button type="button" disabled={!plants.length} style={styles.button} onClick={saveUserPlants}>Lưu Plant access</button>
+            {!plants.length && <p>Tạo Plant đã ánh xạ tổ chức trước khi cấp quyền.</p>}
+            <button type="button" style={styles.button} onClick={saveUserPlants}>Lưu phạm vi tổ chức</button>
           </fieldset>}
           <p>Thu hồi Plant sẽ chặn request kế tiếp ngay lập tức; người dùng không cần đăng xuất.</p>
         </section>

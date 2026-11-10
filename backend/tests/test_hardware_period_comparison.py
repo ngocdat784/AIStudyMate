@@ -12,6 +12,7 @@ from app.database.base import Base
 from app.database.connection import get_db
 from app.main import app
 from app.models import AnalysisHistory
+from auth_test_helpers import clear_admin_auth_override, override_admin_auth
 from app.services.hardware_comparison_service import (
     compare_hardware_periods,
 )
@@ -190,10 +191,13 @@ class HardwarePeriodComparisonEndpointTests(unittest.TestCase):
                 yield session
 
         app.dependency_overrides[get_db] = override_get_db
+        override_admin_auth()
         self.client = TestClient(app)
 
     def tearDown(self):
+        self.client.close()
         app.dependency_overrides.pop(get_db, None)
+        clear_admin_auth_override()
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 

@@ -5,12 +5,14 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from app.main import app
+from auth_test_helpers import clear_admin_auth_override, override_admin_auth
 from app.services import hardware_ai_service
 from app.services.hardware_service import compare_hardware_models
 
 
 class HardwareComparisonTests(unittest.TestCase):
     def setUp(self):
+        override_admin_auth()
         self.dataframe = pd.DataFrame(
             {
                 "Model": ["A", "B", "B", "A", "B"],
@@ -19,6 +21,9 @@ class HardwareComparisonTests(unittest.TestCase):
                 "Downtime": [4, 8, 8, 1, 2],
             }
         )
+
+    def tearDown(self):
+        clear_admin_auth_override()
 
     def test_comparison_uses_shared_cleaning_and_kpi_rules(self):
         result = compare_hardware_models(

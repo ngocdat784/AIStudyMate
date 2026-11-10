@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from fastapi.testclient import TestClient
 
 from app.main import app
+from auth_test_helpers import clear_admin_auth_override, override_admin_auth
 from app.services.hardware_ai_service import (
     HardwareTrendAnalysis,
     _build_hardware_trend_evidence,
@@ -830,7 +831,12 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
 
 class HardwareTrendAIEndpointTests(unittest.TestCase):
     def setUp(self):
+        override_admin_auth()
         self.client = TestClient(app)
+
+    def tearDown(self):
+        self.client.close()
+        clear_admin_auth_override()
 
     def test_ai_unavailability_keeps_python_trend_statistics(self):
         dataset_id = store_merged_hardware_dataset(
@@ -868,7 +874,7 @@ class HardwareTrendAIEndpointTests(unittest.TestCase):
         self.assertIn("Python", result["ai_error"])
         self.assertEqual(result["summary"]["totals"]["production"], 100)
         self.assertEqual(result["summary"]["totals"]["defect_rate"], 2)
-        log_exception.assert_called_once_with(
+        log_exception.assert_any_call(
             "Hardware trend AI analysis failed: %s",
             str(api_error),
         )

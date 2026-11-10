@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { apiFetch } from "../../lib/api";
 import "./history.css";
 
 const API_BASE_URL = "http://127.0.0.1:8000/api/history";
@@ -464,7 +465,7 @@ export default function HistoryPage() {
 
     const fetchHistory = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}?${params.toString()}`, {
+        const response = await apiFetch(`${API_BASE_URL}?${params.toString()}`, {
           cache: "no-store",
         });
         if (!response.ok) {
@@ -520,7 +521,7 @@ export default function HistoryPage() {
     setActionError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_BASE_URL}/${item.id}`, {
+      const response = await apiFetch(`${API_BASE_URL}/${item.id}`, {
         cache: "no-store",
       });
       if (!response.ok) {
@@ -551,7 +552,7 @@ export default function HistoryPage() {
     setActionError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_BASE_URL}/${item.id}`, {
+      const response = await apiFetch(`${API_BASE_URL}/${item.id}`, {
         method: "DELETE",
       });
       if (!response.ok) {

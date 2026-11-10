@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from reportlab.pdfgen import canvas
 
 from app.main import app
+from auth_test_helpers import clear_admin_auth_override, override_admin_auth
 from app.routes.hardware import (
     MAX_FILE_SIZE,
     MAX_MULTIPLE_FILES,
@@ -20,7 +21,12 @@ from app.routes.hardware import (
 
 class HardwareMultipleUploadTests(unittest.TestCase):
     def setUp(self):
+        override_admin_auth()
         self.client = TestClient(app)
+
+    def tearDown(self):
+        self.client.close()
+        clear_admin_auth_override()
 
     def test_openapi_marks_each_upload_as_a_file(self):
         schema = app.openapi()

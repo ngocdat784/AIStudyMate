@@ -4,10 +4,14 @@
 import {
   ChangeEvent,
   FormEvent,
+  MouseEvent,
   useMemo,
   useState,
 } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { apiFetch } from "../lib/api";
+import { hasAuthToken, redirectToLogin } from "../lib/auth";
 
 type KPI = {
   name: string;
@@ -715,6 +719,7 @@ function HardwareInterventionDashboard({
 }
 
 export default function Home() {
+  const router = useRouter();
   const [selectedFile, setSelectedFile] =
     useState<File | null>(null);
 
@@ -912,7 +917,7 @@ export default function Home() {
         formData.append("files", file);
       });
 
-      const response = await fetch(
+      const response = await apiFetch(
         "http://127.0.0.1:8000/api/hardware/analyze-multiple",
         {
           method: "POST",
@@ -970,7 +975,7 @@ export default function Home() {
     setTrendResult(null);
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         "http://127.0.0.1:8000/api/hardware/trends",
         {
           method: "POST",
@@ -1050,7 +1055,7 @@ export default function Home() {
     setInterventionResult(null);
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         "http://127.0.0.1:8000/api/hardware/evaluate-intervention",
         {
           method: "POST",
@@ -1157,7 +1162,7 @@ export default function Home() {
       formData.append("custom_prompt", customPrompt);
 
       const response =
-        await fetch(
+        await apiFetch(
           "http://127.0.0.1:8000/api/hardware/analyze",
           {
             method: "POST",
@@ -1253,7 +1258,7 @@ export default function Home() {
       formData.append("model_a", selectedModelA);
       formData.append("model_b", selectedModelB);
 
-      const response = await fetch(
+      const response = await apiFetch(
         "http://127.0.0.1:8000/api/hardware/compare",
         {
           method: "POST",
@@ -1294,52 +1299,8 @@ export default function Home() {
     setExportError("");
 
     try {
-      const response = await fetch(
-        `http://127.0.0.1:8000/api/hardware/export?format=${format}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(result),
-        }
-      );
-
-      if (!response.ok) {
-        let message = "Không thể xuất báo cáo HardwareAI.";
-        const responseText = await response.text();
-
-        if (responseText) {
-          try {
-            const data: unknown = JSON.parse(responseText);
-            if (
-              typeof data === "object" &&
-              data !== null &&
-              "detail" in data &&
-              typeof data.detail === "string"
-            ) {
-              message = data.detail;
-            }
-          } catch {
-            message = responseText;
-          }
-        }
-
-        throw new Error(message);
-      }
-
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download =
-        format === "pdf"
-          ? "HardwareAI_Report.pdf"
-          : "HardwareAI_Report.xlsx";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      window.localStorage.setItem("pending-governed-report", JSON.stringify(result));
+      router.push("/reports?create=1");
     } catch (error) {
       console.error("HardwareAI report export failed:", error);
       setExportError(
@@ -1380,15 +1341,6 @@ export default function Home() {
   // --------------------------------
   // KPI helpers
   // --------------------------------
-
-  const getKPI = (
-    name: string
-  ) => {
-    return result?.kpis.find(
-      (kpi) =>
-        kpi.name === name
-    );
-  };
 
   const getKPIByNames = (
     names: string[]
@@ -1515,8 +1467,55 @@ export default function Home() {
     return `${formatted} ${unit}`;
   };
 
+  function guardProtectedClick(event: MouseEvent<HTMLElement>) {
+    if (hasAuthToken()) {
+      return;
+    }
+
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+
+    const interactive = target.closest(
+      "a, button, input, select, textarea, summary, [role='button']",
+    );
+    if (
+      !interactive ||
+      interactive.closest(".upload-card:not(.multi-upload-card)")
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    redirectToLogin();
+  }
+
+  function guardProtectedSubmit(event: FormEvent<HTMLElement>) {
+    if (hasAuthToken()) {
+      return;
+    }
+
+    const target = event.target;
+    if (
+      !(target instanceof Element) ||
+      target.closest(".upload-card:not(.multi-upload-card)")
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    redirectToLogin();
+  }
+
   return (
-    <main className="dashboard-app">
+    <main
+      className="dashboard-app"
+      onClickCapture={guardProtectedClick}
+      onSubmitCapture={guardProtectedSubmit}
+    >
 
       <div className="background-glow background-glow-one" />
       <div className="background-glow background-glow-two" />

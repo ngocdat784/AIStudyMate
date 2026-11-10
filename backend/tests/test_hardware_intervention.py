@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 from fastapi.testclient import TestClient
+from app.config import settings
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -310,6 +311,10 @@ class HardwareInterventionServiceTests(unittest.TestCase):
 
 class HardwareInterventionEndpointTests(unittest.TestCase):
     def setUp(self):
+        self.auth_secret = settings.ALERT_AUTH_SECRET
+        self.bootstrap_token = settings.ALERT_BOOTSTRAP_TOKEN
+        settings.ALERT_AUTH_SECRET = "test-intervention-auth-secret-32bytes"
+        settings.ALERT_BOOTSTRAP_TOKEN = "test-intervention-bootstrap"
         self.engine = create_engine(
             "sqlite+pysqlite:///:memory:",
             connect_args={"check_same_thread": False},
@@ -323,9 +328,25 @@ class HardwareInterventionEndpointTests(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
+        bootstrap = self.client.post(
+            "/api/monitoring/auth/bootstrap-admin",
+            json={
+                "email": "intervention-admin@example.test",
+                "password": "secure-test-password",
+                "display_name": "Intervention Admin",
+                "bootstrap_token": "test-intervention-bootstrap",
+            },
+        )
+        self.assertEqual(bootstrap.status_code, 201, bootstrap.text)
+        self.client.headers.update(
+            {"Authorization": f"Bearer {bootstrap.json()['access_token']}"}
+        )
 
     def tearDown(self):
+        self.client.close()
         app.dependency_overrides.pop(get_db, None)
+        settings.ALERT_AUTH_SECRET = self.auth_secret
+        settings.ALERT_BOOTSTRAP_TOKEN = self.bootstrap_token
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 

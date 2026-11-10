@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database.base import Base
 from app.database.connection import get_db
+from app.config import settings
 from app.main import app
 from app.models import AnalysisHistory
 from app.services.analysis_history_service import create_analysis_history
@@ -62,6 +63,10 @@ class AnalysisHistoryModelTests(unittest.TestCase):
 
 class AnalysisHistoryAPITests(unittest.TestCase):
     def setUp(self):
+        self.auth_secret = settings.ALERT_AUTH_SECRET
+        self.bootstrap_token = settings.ALERT_BOOTSTRAP_TOKEN
+        settings.ALERT_AUTH_SECRET = "test-analysis-history-auth-secret-32"
+        settings.ALERT_BOOTSTRAP_TOKEN = "test-analysis-history-bootstrap"
         self.engine = create_engine(
             "sqlite+pysqlite:///:memory:",
             connect_args={"check_same_thread": False},
@@ -75,9 +80,25 @@ class AnalysisHistoryAPITests(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
+        bootstrap = self.client.post(
+            "/api/monitoring/auth/bootstrap-admin",
+            json={
+                "email": "history-admin@example.test",
+                "password": "secure-test-password",
+                "display_name": "History Admin",
+                "bootstrap_token": "test-analysis-history-bootstrap",
+            },
+        )
+        self.assertEqual(bootstrap.status_code, 201, bootstrap.text)
+        self.client.headers.update(
+            {"Authorization": f"Bearer {bootstrap.json()['access_token']}"}
+        )
 
     def tearDown(self):
+        self.client.close()
         app.dependency_overrides.pop(get_db, None)
+        settings.ALERT_AUTH_SECRET = self.auth_secret
+        settings.ALERT_BOOTSTRAP_TOKEN = self.bootstrap_token
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 

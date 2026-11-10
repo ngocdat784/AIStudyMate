@@ -1,10 +1,17 @@
 import unittest
 from datetime import date
 from unittest.mock import patch
+from typing import Iterator
 
 import pandas as pd
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
+from app.config import settings
+from app.database.base import Base
+from app.database.connection import get_db
 from app.main import app
 from app.services.hardware_trend_service import (
     _build_consecutive_defect_rate_alerts,
@@ -370,7 +377,44 @@ class HardwareTrendServiceTests(unittest.TestCase):
 
 class HardwareTrendEndpointTests(unittest.TestCase):
     def setUp(self):
+        self.engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(self.engine)
+
+        def override_get_db() -> Iterator[Session]:
+            with Session(self.engine) as session:
+                yield session
+
+        app.dependency_overrides[get_db] = override_get_db
+        self.auth_secret = settings.ALERT_AUTH_SECRET
+        self.bootstrap_token = settings.ALERT_BOOTSTRAP_TOKEN
+        settings.ALERT_AUTH_SECRET = "test-hardware-trends-auth-secret-32"
+        settings.ALERT_BOOTSTRAP_TOKEN = "test-hardware-trends-bootstrap"
         self.client = TestClient(app)
+        bootstrap = self.client.post(
+            "/api/monitoring/auth/bootstrap-admin",
+            json={
+                "email": "trends-admin@example.test",
+                "password": "secure-test-password",
+                "display_name": "Trends Admin",
+                "bootstrap_token": "test-hardware-trends-bootstrap",
+            },
+        )
+        self.assertEqual(bootstrap.status_code, 201, bootstrap.text)
+        self.client.headers.update(
+            {"Authorization": f"Bearer {bootstrap.json()['access_token']}"}
+        )
+
+    def tearDown(self):
+        self.client.close()
+        app.dependency_overrides.pop(get_db, None)
+        settings.ALERT_AUTH_SECRET = self.auth_secret
+        settings.ALERT_BOOTSTRAP_TOKEN = self.bootstrap_token
+        Base.metadata.drop_all(self.engine)
+        self.engine.dispose()
 
     def test_multi_file_endpoint_provides_dataset_id_for_trend_endpoint(self):
         merge_response = self.client.post(

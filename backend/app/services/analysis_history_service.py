@@ -11,6 +11,12 @@ def create_analysis_history(
     *,
     analysis_type: str,
     result_data: dict[str, Any],
+    creator_user_id: int | None = None,
+    source_file_sha256: str | None = None,
+    dataset_version: int | None = None,
+    algorithm_version: str | None = None,
+    ai_status: str | None = None,
+    evidence: list[dict[str, Any]] | None = None,
     title: str | None = None,
     summary: str | None = None,
     source_filename: str | None = None,
@@ -24,6 +30,12 @@ def create_analysis_history(
         source_filename=source_filename,
         dataset_id=dataset_id,
         result_data=result_data,
+        creator_user_id=creator_user_id,
+        source_file_sha256=source_file_sha256,
+        dataset_version=dataset_version,
+        algorithm_version=algorithm_version,
+        ai_status=ai_status,
+        evidence=evidence,
     )
 
     try:
@@ -42,11 +54,14 @@ def list_analysis_history(
     page: int = 1,
     page_size: int = 10,
     analysis_type: str | None = None,
+    creator_user_id: int | None = None,
 ) -> dict[str, Any]:
     """Return paginated history, newest first."""
     filters = []
     if analysis_type:
         filters.append(AnalysisHistory.analysis_type == analysis_type)
+    if creator_user_id is not None:
+        filters.append(AnalysisHistory.creator_user_id == creator_user_id)
 
     count_statement = select(func.count()).select_from(AnalysisHistory)
     data_statement = select(AnalysisHistory)

@@ -26,6 +26,62 @@ button {
   cursor: pointer;
 }
 
+.site-header {
+  min-height: 60px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 8px clamp(16px, 4vw, 40px);
+  border-bottom: 1px solid #e1e6ef;
+  background: #fff;
+}
+
+.site-brand {
+  color: #172033;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.site-navigation,
+.site-navigation nav,
+.site-auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.site-navigation nav a {
+  color: #34425a;
+  text-decoration: none;
+}
+
+.site-auth-actions button,
+.site-login-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 7px 12px;
+  border: 1px solid #d5dce7;
+  border-radius: 8px;
+  background: #fff;
+  color: #2259bd;
+  text-decoration: none;
+}
+
+.site-user-name {
+  color: #4b5870;
+  font-size: 13px;
+}
+
+.site-auth-error {
+  color: #b42318;
+  font-size: 12px;
+}
+
 .dashboard-app {
   min-height: 100vh;
   position: relative;

@@ -1,11 +1,12 @@
 import csv
+import hashlib
 import io
 import logging
 import math
 from datetime import date, datetime
 from pathlib import Path
 import re
-from typing import Any, Literal
+from typing import Any
 
 import pandas as pd
 from docx import Document
@@ -17,15 +18,15 @@ from fastapi import (
     File,
     Form,
     HTTPException,
-    Query,
     UploadFile,
 )
-from fastapi.responses import StreamingResponse
 from pypdf import PdfReader
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
+from app.models.monitoring import AlertUser
+from app.services.monitoring_auth import get_current_user, require_roles
 from app.services.analysis_history_service import create_analysis_history
 from app.services.hardware_ai_service import (
     analyze_hardware_comparison,
@@ -41,10 +42,6 @@ from app.services.hardware_service import (
 from app.services.hardware_comparison_service import (
     ComparisonDimension,
     compare_hardware_periods,
-)
-from app.services.hardware_report_service import (
-    build_hardware_pdf,
-    build_hardware_xlsx,
 )
 from app.services.multi_file_service import (
     DATASET_CACHE_TTL_SECONDS,
@@ -65,6 +62,7 @@ from app.services.hardware_intervention_service import (
 router = APIRouter(
     prefix="/api/hardware",
     tags=["HardwareAI - Hardware Analysis"],
+    dependencies=[Depends(require_roles("admin", "operator"))],
 )
 
 logger = logging.getLogger(__name__)
@@ -441,11 +439,13 @@ async def _read_hardware_upload(
 def _save_hardware_history_safely(
     db: Session,
     *,
+    creator_user_id: int,
     analysis_type: str,
     title: str,
     result_data: dict[str, Any],
     source_filename: str | None = None,
     dataset_id: str | None = None,
+    source_file_sha256: str | None = None,
 ) -> None:
     """Save analysis history without breaking a successful analysis response."""
     try:
@@ -463,7 +463,12 @@ def _save_hardware_history_safely(
             summary=summary,
             source_filename=source_filename,
             dataset_id=dataset_id,
+            source_file_sha256=source_file_sha256,
+            algorithm_version="hardware-analysis-v1",
+            ai_status=encoded_result.get("ai_status"),
+            evidence=encoded_result.get("evidence"),
             result_data=encoded_result,
+            creator_user_id=creator_user_id,
         )
     except Exception:
         logger.exception(
@@ -472,11 +477,21 @@ def _save_hardware_history_safely(
         )
 
 
+def _upload_sha256(file: UploadFile) -> str:
+    file.file.seek(0)
+    digest = hashlib.sha256()
+    while chunk := file.file.read(1024 * 1024):
+        digest.update(chunk)
+    file.file.seek(0)
+    return digest.hexdigest()
+
+
 @router.post("/analyze")
 async def analyze_hardware(
     file: UploadFile = File(...),
     custom_prompt: str = Form(default="", max_length=2000),
     db: Session = Depends(get_db),
+    user: AlertUser = Depends(get_current_user),
 ):
     try:
         dataframe = await _read_hardware_upload(
@@ -502,6 +517,8 @@ async def analyze_hardware(
                 )
         _save_hardware_history_safely(
             db,
+            creator_user_id=user.id,
+            source_file_sha256=_upload_sha256(file),
             analysis_type="hardware_analysis",
             title="Phân tích dữ liệu phần cứng",
             source_filename=file.filename,
@@ -527,6 +544,7 @@ async def compare_hardware(
     model_a: str = Form(...),
     model_b: str = Form(...),
     db: Session = Depends(get_db),
+    user: AlertUser = Depends(get_current_user),
 ):
     try:
         dataframe = await _read_hardware_upload(file)
@@ -555,6 +573,8 @@ async def compare_hardware(
 
         _save_hardware_history_safely(
             db,
+            creator_user_id=user.id,
+            source_file_sha256=_upload_sha256(file),
             analysis_type="hardware_comparison",
             title=f"So sánh phần cứng: {model_a} và {model_b}",
             source_filename=file.filename,
@@ -580,6 +600,7 @@ async def compare_hardware_periods_endpoint(
     period_b_end: date = Form(...),
     dimension: ComparisonDimension | None = Form(default=None),
     db: Session = Depends(get_db),
+    user: AlertUser = Depends(get_current_user),
 ):
     try:
         dataframe = await _read_hardware_upload(file)
@@ -601,6 +622,8 @@ async def compare_hardware_periods_endpoint(
         dimension_label = f" theo {dimension}" if dimension else ""
         _save_hardware_history_safely(
             db,
+            creator_user_id=user.id,
+            source_file_sha256=_upload_sha256(file),
             analysis_type="hardware_period_comparison",
             title=f"So sánh hai khoảng thời gian{dimension_label}",
             source_filename=file.filename,
@@ -619,64 +642,14 @@ async def compare_hardware_periods_endpoint(
 
 @router.post("/export")
 def export_hardware_report(
-    payload: dict[str, Any] = Body(...),
-    file_format: Literal["pdf", "xlsx"] = Query(
-        default="pdf",
-        alias="format",
-    ),
+    _: dict[str, Any] = Body(...),
 ):
-    if not payload:
-        raise HTTPException(
-            status_code=422,
-            detail="Không có dữ liệu phân tích để xuất báo cáo.",
-        )
-    if not any(
-        key in payload
-        for key in (
-            "title",
-            "summary",
-            "kpis",
-            "daily_production",
-            "ai_analysis",
-        )
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail="Payload không có cấu trúc kết quả phân tích HardwareAI.",
-        )
-
-    if file_format == "pdf":
-        try:
-            content = build_hardware_pdf(payload)
-        except Exception as error:
-            logger.exception("HardwareAI PDF report generation failed")
-            raise HTTPException(
-                status_code=500,
-                detail="Không thể tạo báo cáo PDF.",
-            ) from error
-        media_type = "application/pdf"
-        filename = "HardwareAI_Report.pdf"
-    else:
-        try:
-            content = build_hardware_xlsx(payload)
-        except Exception as error:
-            logger.exception("HardwareAI Excel report generation failed")
-            raise HTTPException(
-                status_code=500,
-                detail="Không thể tạo báo cáo Excel.",
-            ) from error
-        media_type = (
-            "application/vnd.openxmlformats-officedocument."
-            "spreadsheetml.sheet"
-        )
-        filename = "HardwareAI_Report.xlsx"
-
-    return StreamingResponse(
-        iter([content]),
-        media_type=media_type,
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-        },
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Xuất báo cáo trực tiếp đã tắt. Hãy lưu báo cáo, gửi duyệt, "
+            "phát hành rồi xuất từ Analysis Reports."
+        ),
     )
 
 
@@ -692,6 +665,7 @@ async def analyze_hardware_multiple(
             }
         },
     ),
+    user: AlertUser = Depends(get_current_user),
 ):
     """Normalize, validate, and merge uploaded hardware files."""
     if len(files) < 2:
@@ -741,7 +715,10 @@ async def analyze_hardware_multiple(
     result = normalize_hardware_files(upload_results)
     merged = merge_normalized_hardware_files(result)
     dataset_id = (
-        store_merged_hardware_dataset(merged.dataframe)
+        store_merged_hardware_dataset(
+            merged.dataframe,
+            owner_user_id=user.id,
+        )
         if merged.report["files_merged"] > 0
         else None
     )
@@ -798,8 +775,13 @@ async def analyze_hardware_multiple(
 async def analyze_hardware_trend(
     request: HardwareTrendRequest,
     db: Session = Depends(get_db),
+    user: AlertUser = Depends(get_current_user),
 ):
-    dataframe = get_merged_hardware_dataset(request.dataset_id)
+    dataframe = get_merged_hardware_dataset(
+        request.dataset_id,
+        user_id=user.id,
+        is_admin=user.role == "admin",
+    )
     if dataframe is None:
         raise HTTPException(
             status_code=404,
@@ -841,6 +823,7 @@ async def analyze_hardware_trend(
 
     _save_hardware_history_safely(
         db,
+        creator_user_id=user.id,
         analysis_type="hardware_trends",
         title="Phân tích xu hướng phần cứng",
         dataset_id=request.dataset_id,
@@ -853,8 +836,13 @@ async def analyze_hardware_trend(
 def evaluate_hardware_intervention_endpoint(
     request: HardwareInterventionRequest,
     db: Session = Depends(get_db),
+    user: AlertUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    dataframe = get_merged_hardware_dataset(request.dataset_id)
+    dataframe = get_merged_hardware_dataset(
+        request.dataset_id,
+        user_id=user.id,
+        is_admin=user.role == "admin",
+    )
     if dataframe is None:
         raise HTTPException(
             status_code=404,
@@ -889,6 +877,7 @@ def evaluate_hardware_intervention_endpoint(
 
     _save_hardware_history_safely(
         db,
+        creator_user_id=user.id,
         analysis_type="hardware_intervention",
         title="Đánh giá hiệu quả can thiệp sản xuất",
         dataset_id=request.dataset_id,

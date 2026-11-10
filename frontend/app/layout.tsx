@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import AuthNavigation from "./auth-navigation";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,16 +17,12 @@ export default function RootLayout({
   return (
     <html lang="vi">
       <body>
-        <nav
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            padding: "8px 20px",
-            borderBottom: "1px solid #e1e6ef",
-          }}
-        >
-          <Link href="/monitoring">Intelligent Monitoring</Link>
-        </nav>
+        <header className="site-header">
+          <Link className="site-brand" href="/">
+            HardwareAI
+          </Link>
+          <AuthNavigation />
+        </header>
         {children}
       </body>
     </html>

@@ -133,54 +133,49 @@ class HardwareReportServiceTests(unittest.TestCase):
 
 class HardwareReportEndpointTests(unittest.TestCase):
     def setUp(self):
+        from auth_test_helpers import override_admin_auth
+
+        self.auth_override = override_admin_auth
         self.client = TestClient(app)
 
-    def test_export_endpoint_serves_pdf_and_xlsx(self):
-        pdf_response = self.client.post(
+    def tearDown(self):
+        from auth_test_helpers import clear_admin_auth_override
+
+        self.client.close()
+        clear_admin_auth_override()
+
+    def test_export_endpoint_requires_governed_publication(self):
+        from auth_test_helpers import override_admin_auth
+
+        override_admin_auth()
+        response = self.client.post(
             "/api/hardware/export?format=pdf",
             json=SAMPLE_ANALYSIS,
         )
-        xlsx_response = self.client.post(
-            "/api/hardware/export?format=xlsx",
-            json=SAMPLE_ANALYSIS,
-        )
-
-        self.assertEqual(pdf_response.status_code, 200)
-        self.assertEqual(pdf_response.headers["content-type"], "application/pdf")
-        self.assertIn(
-            'filename="HardwareAI_Report.pdf"',
-            pdf_response.headers["content-disposition"],
-        )
-        self.assertTrue(pdf_response.content.startswith(b"%PDF-"))
-
-        self.assertEqual(xlsx_response.status_code, 200)
-        self.assertIn(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            xlsx_response.headers["content-type"],
-        )
-        self.assertIn(
-            'filename="HardwareAI_Report.xlsx"',
-            xlsx_response.headers["content-disposition"],
-        )
-        with ZipFile(BytesIO(xlsx_response.content)) as xlsx_file:
-            self.assertIn("xl/workbook.xml", xlsx_file.namelist())
+        self.assertEqual(response.status_code, 410)
 
     def test_export_endpoint_rejects_empty_or_unrelated_payloads(self):
+        from auth_test_helpers import override_admin_auth
+
+        override_admin_auth()
         for payload in ({}, {"unrelated": "data"}):
             with self.subTest(payload=payload):
                 response = self.client.post(
                     "/api/hardware/export",
                     json=payload,
                 )
-                self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.status_code, 410)
 
     def test_export_endpoint_rejects_unsupported_format(self):
+        from auth_test_helpers import override_admin_auth
+
+        override_admin_auth()
         response = self.client.post(
             "/api/hardware/export?format=doc",
             json=SAMPLE_ANALYSIS,
         )
 
-        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 410)
 
 
 if __name__ == "__main__":

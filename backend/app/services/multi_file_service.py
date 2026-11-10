@@ -202,38 +202,53 @@ class MergedHardwareDataset:
 
 DATASET_CACHE_TTL_SECONDS = 60 * 60
 MAX_CACHED_DATASETS = 25
-_dataset_cache: OrderedDict[str, tuple[float, pd.DataFrame]] = OrderedDict()
+_dataset_cache: OrderedDict[str, tuple[float, pd.DataFrame, int | None]] = OrderedDict()
 _dataset_cache_lock = threading.RLock()
 
 
-def store_merged_hardware_dataset(dataframe: pd.DataFrame) -> str:
+def store_merged_hardware_dataset(
+    dataframe: pd.DataFrame,
+    *,
+    owner_user_id: int | None = None,
+) -> str:
     now = time.monotonic()
     with _dataset_cache_lock:
         expired_ids = [
             dataset_id
-            for dataset_id, (created_at, _) in _dataset_cache.items()
+            for dataset_id, (created_at, _, _) in _dataset_cache.items()
             if now - created_at >= DATASET_CACHE_TTL_SECONDS
         ]
         for dataset_id in expired_ids:
             del _dataset_cache[dataset_id]
 
         dataset_id = uuid.uuid4().hex
-        _dataset_cache[dataset_id] = (now, dataframe.copy(deep=True))
+        _dataset_cache[dataset_id] = (
+            now,
+            dataframe.copy(deep=True),
+            owner_user_id,
+        )
         while len(_dataset_cache) > MAX_CACHED_DATASETS:
             _dataset_cache.popitem(last=False)
         return dataset_id
 
 
-def get_merged_hardware_dataset(dataset_id: str) -> pd.DataFrame | None:
+def get_merged_hardware_dataset(
+    dataset_id: str,
+    *,
+    user_id: int | None = None,
+    is_admin: bool = False,
+) -> pd.DataFrame | None:
     now = time.monotonic()
     with _dataset_cache_lock:
         cached = _dataset_cache.get(dataset_id)
         if cached is None:
             return None
 
-        created_at, dataframe = cached
+        created_at, dataframe, owner_user_id = cached
         if now - created_at >= DATASET_CACHE_TTL_SECONDS:
             del _dataset_cache[dataset_id]
+            return None
+        if owner_user_id is not None and owner_user_id != user_id and not is_admin:
             return None
 
         _dataset_cache.move_to_end(dataset_id)
