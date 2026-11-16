@@ -5,7 +5,7 @@ from typing import Iterator
 
 import pandas as pd
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -13,6 +13,7 @@ from app.config import settings
 from app.database.base import Base
 from app.database.connection import get_db
 from app.main import app
+from app.models.monitoring import AlertUser
 from app.services.hardware_trend_service import (
     _build_consecutive_defect_rate_alerts,
     analyze_hardware_trends,
@@ -416,6 +417,16 @@ class HardwareTrendEndpointTests(unittest.TestCase):
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 
+    def _store_dataset(self, dataframe: pd.DataFrame) -> str:
+        with Session(self.engine) as db:
+            owner_user_id = db.scalar(select(AlertUser.id))
+            assert owner_user_id is not None
+            return store_merged_hardware_dataset(
+                dataframe,
+                owner_user_id=owner_user_id,
+                db=db,
+            )
+
     def test_multi_file_endpoint_provides_dataset_id_for_trend_endpoint(self):
         merge_response = self.client.post(
             "/api/hardware/analyze-multiple",
@@ -486,7 +497,7 @@ class HardwareTrendEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_trend_endpoint_rejects_unknown_granularity(self):
-        dataset_id = store_merged_hardware_dataset(
+        dataset_id = self._store_dataset(
             pd.DataFrame(
                 {
                     "Date": ["2026-10-01"],
@@ -494,8 +505,6 @@ class HardwareTrendEndpointTests(unittest.TestCase):
                 }
             )
         )
-        self.assertIsNotNone(get_merged_hardware_dataset(dataset_id))
-
         response = self.client.post(
             "/api/hardware/trends",
             json={
@@ -511,7 +520,7 @@ class HardwareTrendEndpointTests(unittest.TestCase):
             "app.services.multi_file_service.DATASET_CACHE_TTL_SECONDS",
             0,
         ):
-            dataset_id = store_merged_hardware_dataset(
+            dataset_id = self._store_dataset(
                 pd.DataFrame(
                     {
                         "Date": ["2026-10-01"],
@@ -519,7 +528,47 @@ class HardwareTrendEndpointTests(unittest.TestCase):
                     }
                 )
             )
-            self.assertIsNone(get_merged_hardware_dataset(dataset_id))
+            with Session(self.engine) as db:
+                self.assertIsNone(
+                    get_merged_hardware_dataset(
+                        dataset_id,
+                        db=db,
+                        user_id=1,
+                    )
+                )
+
+    def test_persistent_dataset_is_shared_and_remains_owner_scoped(self):
+        source = pd.DataFrame(
+            {
+                "Date": pd.to_datetime(["2026-10-01"]),
+                "Product": ["Motor A"],
+                "Production": [100],
+            }
+        )
+        dataset_id = self._store_dataset(source)
+
+        with Session(self.engine) as db:
+            self.assertIsNone(
+                get_merged_hardware_dataset(
+                    dataset_id,
+                    db=db,
+                    user_id=2,
+                )
+            )
+            loaded = get_merged_hardware_dataset(
+                dataset_id,
+                db=db,
+                user_id=1,
+            )
+
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertEqual(loaded.loc[0, "Product"], "Motor A")
+        self.assertEqual(loaded.loc[0, "Production"], 100)
+        self.assertEqual(
+            pd.Timestamp(loaded.loc[0, "Date"]),
+            pd.Timestamp("2026-10-01"),
+        )
 
 
 if __name__ == "__main__":

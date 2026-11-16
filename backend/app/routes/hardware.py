@@ -3,10 +3,12 @@ import hashlib
 import io
 import logging
 import math
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 import re
 from typing import Any
+from uuid import UUID
+import zipfile
 
 import pandas as pd
 from docx import Document
@@ -18,15 +20,26 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     UploadFile,
+    status,
 )
 from pypdf import PdfReader
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, load_only
+from starlette.concurrency import run_in_threadpool
 
-from app.database.connection import get_db
-from app.models.monitoring import AlertUser
-from app.services.monitoring_auth import get_current_user, require_roles
+from app.config import settings
+from app.database.connection import SessionLocal, get_db
+from app.models import AnalysisHistory, HardwareAnalysisJob
+from app.models.monitoring import AlertUser, Plant
+from app.services.monitoring_auth import (
+    get_current_user,
+    require_plant_access,
+    require_roles,
+)
+from app.services.api_rate_limit import rate_limit_dependency
 from app.services.analysis_history_service import create_analysis_history
 from app.services.hardware_ai_service import (
     analyze_hardware_comparison,
@@ -45,6 +58,7 @@ from app.services.hardware_comparison_service import (
 )
 from app.services.multi_file_service import (
     DATASET_CACHE_TTL_SECONDS,
+    DatasetCacheCapacityError,
     get_merged_hardware_dataset,
     merge_normalized_hardware_files,
     normalize_hardware_files,
@@ -57,6 +71,12 @@ from app.services.hardware_trend_service import (
 from app.services.hardware_intervention_service import (
     evaluate_hardware_intervention,
 )
+from app.services.hardware_analysis_jobs import (
+    enqueue_hardware_analysis_job,
+    fail_hardware_analysis_job,
+    serialize_hardware_analysis_job,
+    update_hardware_analysis_job_stage,
+)
 
 
 router = APIRouter(
@@ -68,6 +88,14 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 MAX_FILE_SIZE = 10 * 1024 * 1024
 MAX_MULTIPLE_FILES = 10
+MAX_MULTIPLE_TOTAL_SIZE = 25 * 1024 * 1024
+MAX_HARDWARE_ROWS = 100_000
+MAX_HARDWARE_COLUMNS = 500
+MAX_ARCHIVE_ENTRIES = 1_000
+MAX_ARCHIVE_UNCOMPRESSED_SIZE = 50 * 1024 * 1024
+MAX_PDF_PAGES = 100
+MAX_MULTIPLE_TOTAL_ROWS = 100_000
+MAX_MERGED_RESPONSE_ROWS = 1_000
 AI_UNAVAILABLE_MESSAGE = (
     "Dịch vụ AI hiện tạm thời không khả dụng. "
     "Các chỉ số so sánh được tính bằng Python vẫn có thể sử dụng."
@@ -142,23 +170,38 @@ def _read_csv_robust(content: bytes) -> pd.DataFrame:
         if not text.strip():
             raise ValueError("File CSV không chứa dữ liệu.")
 
-        lines = text.splitlines()
-        nonempty_lines = [line for line in lines if line.strip()]
-        if nonempty_lines and all(
-            line.strip().startswith('"') and line.strip().endswith('"')
-            for line in nonempty_lines
-        ):
+        first_line = ""
+        all_lines_wrapped = True
+        has_nonempty_line = False
+        for line in io.StringIO(text):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            has_nonempty_line = True
+            if not first_line:
+                first_line = stripped
+            if not (
+                stripped.startswith('"')
+                and stripped.endswith('"')
+            ):
+                all_lines_wrapped = False
+
+        if has_nonempty_line and all_lines_wrapped:
             text = "\n".join(
                 line.strip()[1:-1] if line.strip() else line
-                for line in lines
+                for line in io.StringIO(text)
             )
 
-        first_line = next(
-            (line for line in text.splitlines() if line.strip()),
-            "",
-        )
         if not first_line:
             raise ValueError("File CSV không chứa dòng tiêu đề.")
+        if (
+            max(first_line.count(delimiter) for delimiter in delimiters) + 1
+            > MAX_HARDWARE_COLUMNS
+        ):
+            raise HTTPException(
+                status_code=413,
+                detail=f"File vượt quá giới hạn {MAX_HARDWARE_COLUMNS} cột.",
+            )
 
         ordered_delimiters = sorted(
             delimiters,
@@ -178,6 +221,7 @@ def _read_csv_robust(content: bytes) -> pd.DataFrame:
                         engine="python",
                         dtype=object,
                         quoting=quoting,
+                        nrows=MAX_HARDWARE_ROWS + 1,
                     )
                 except (pd.errors.ParserError, ValueError) as error:
                     last_error = error
@@ -196,6 +240,7 @@ def _read_csv_robust(content: bytes) -> pd.DataFrame:
                     io.StringIO(text),
                     dtype=object,
                     engine="python",
+                    nrows=MAX_HARDWARE_ROWS + 1,
                 )
             except (pd.errors.ParserError, ValueError) as error:
                 last_error = error
@@ -209,7 +254,7 @@ def _read_csv_robust(content: bytes) -> pd.DataFrame:
 
     if last_error is not None:
         raise ValueError(
-            f"Không thể đọc CSV: {last_error}"
+            "Không thể đọc CSV với encoding hoặc định dạng được hỗ trợ."
         ) from last_error
     raise ValueError(
         "Không thể đọc file CSV với các encoding được hỗ trợ."
@@ -227,9 +272,7 @@ def _read_docx_hardware_tables(content: bytes) -> pd.DataFrame:
     try:
         document = Document(io.BytesIO(content))
     except Exception as error:
-        raise ValueError(
-            f"Không thể đọc file DOCX: {error}"
-        ) from error
+        raise ValueError("Không thể đọc file DOCX.") from error
 
     frames = []
     for table in document.tables:
@@ -273,18 +316,20 @@ def _read_pdf_hardware_tables(content: bytes) -> pd.DataFrame:
     try:
         reader = PdfReader(io.BytesIO(content))
     except Exception as error:
-        raise ValueError(
-            f"Không thể đọc file PDF: {error}"
-        ) from error
+        raise ValueError("Không thể đọc file PDF.") from error
+
+    if len(reader.pages) > MAX_PDF_PAGES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"PDF vượt quá giới hạn {MAX_PDF_PAGES} trang.",
+        )
 
     frames = []
     for page in reader.pages:
         try:
             page_text = page.extract_text(extraction_mode="layout") or ""
         except Exception as error:
-            raise ValueError(
-                f"Không thể trích xuất bảng từ PDF: {error}"
-            ) from error
+            raise ValueError("Không thể trích xuất bảng từ PDF.") from error
 
         headers = None
         rows = []
@@ -328,18 +373,18 @@ def _read_pdf_hardware_tables(content: bytes) -> pd.DataFrame:
     return dataframe
 
 
-async def _read_hardware_upload(
-    file: UploadFile,
+def _validate_hardware_filename(
+    filename: str | None,
     *,
     allow_documents: bool = False,
-) -> pd.DataFrame:
-    if not file.filename:
+) -> str:
+    if not filename:
         raise HTTPException(
             status_code=400,
             detail="Vui lòng chọn file dữ liệu.",
         )
 
-    extension = Path(file.filename).suffix.lower()
+    extension = Path(filename).suffix.lower()
     supported_extensions = {".csv", ".xlsx"}
     if allow_documents:
         supported_extensions.update({".pdf", ".docx"})
@@ -354,40 +399,72 @@ async def _read_hardware_upload(
             detail=f"Chỉ hỗ trợ file {supported_formats}.",
         )
 
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail="File không được vượt quá 10MB.",
-        )
+    return extension
 
+
+async def _read_upload_content(file: UploadFile) -> bytes:
+    return await _read_upload_content_with_limit(file, MAX_FILE_SIZE)
+
+
+async def _read_upload_content_with_limit(
+    file: UploadFile,
+    max_file_size: int,
+) -> bytes:
+    content = bytearray()
+    while chunk := await file.read(64 * 1024):
+        if len(content) + len(chunk) > max_file_size:
+            if max_file_size == MAX_FILE_SIZE:
+                message = "File không được vượt quá 10MB."
+            else:
+                message = "Tổng dung lượng tải lên vượt quá giới hạn cho phép."
+            raise HTTPException(
+                status_code=413,
+                detail=message,
+            )
+        content.extend(chunk)
     if not content:
         raise HTTPException(
             status_code=400,
             detail="File tải lên đang trống.",
         )
+    return bytes(content)
+
+
+def _parse_hardware_content(
+    filename: str,
+    content: bytes,
+    *,
+    allow_documents: bool = False,
+) -> pd.DataFrame:
+    extension = _validate_hardware_filename(
+        filename,
+        allow_documents=allow_documents,
+    )
+    if not content:
+        raise ValueError("File tải lên đang trống.")
+    if extension in {".xlsx", ".docx"}:
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                entries = archive.infolist()
+        except (OSError, zipfile.BadZipFile) as error:
+            raise ValueError("Tệp Office không hợp lệ.") from error
+        if len(entries) > MAX_ARCHIVE_ENTRIES or sum(
+            entry.file_size for entry in entries
+        ) > MAX_ARCHIVE_UNCOMPRESSED_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail="Tệp Office vượt quá giới hạn giải nén cho phép.",
+            )
+        if any(entry.flag_bits & 0x1 for entry in entries):
+            raise ValueError("Không hỗ trợ tệp Office được mã hóa.")
 
     if extension == ".csv":
-        logger.warning(
-            "CSV RAW | filename=%s | size=%d | first_bytes=%r",
-            file.filename,
-            len(content),
-            content[:120],
-        )
-        logger.warning(
-            "CSV TEXT | filename=%s | preview=%r",
-            file.filename,
-            content[:500].decode(
-                "utf-8",
-                errors="backslashreplace",
-            ),
-        )
         dataframe = _read_csv_robust(content)
-        logger.warning(
-            "CSV DEBUG | filename=%s | columns=%s | shape=%s",
-            file.filename,
-            dataframe.columns.tolist(),
-            dataframe.shape,
+        logger.info(
+            "Parsed hardware CSV: filename=%s rows=%d columns=%d",
+            Path(filename).name,
+            len(dataframe.index),
+            len(dataframe.columns),
         )
     elif extension == ".xlsx":
         excel = pd.ExcelFile(
@@ -395,16 +472,26 @@ async def _read_hardware_upload(
             engine="openpyxl",
         )
         frames = []
+        total_rows = 0
         for sheet_name in excel.sheet_names:
             sheet_dataframe = pd.read_excel(
                 excel,
                 sheet_name=sheet_name,
                 engine="openpyxl",
+                nrows=MAX_HARDWARE_ROWS + 1 - total_rows,
             )
             if sheet_dataframe.empty:
                 continue
             sheet_dataframe["_source_sheet"] = sheet_name
             frames.append(sheet_dataframe)
+            total_rows += len(sheet_dataframe.index)
+            if total_rows > MAX_HARDWARE_ROWS:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"File vượt quá giới hạn {MAX_HARDWARE_ROWS:,} dòng."
+                    ),
+                )
 
         if not frames:
             raise ValueError("File Excel không chứa dữ liệu.")
@@ -428,12 +515,35 @@ async def _read_hardware_upload(
             ) from error
 
     if dataframe.empty:
+        raise ValueError("File không chứa dữ liệu.")
+    if len(dataframe.columns) > MAX_HARDWARE_COLUMNS:
         raise HTTPException(
-            status_code=400,
-            detail="File không chứa dữ liệu.",
+            status_code=413,
+            detail=f"File vượt quá giới hạn {MAX_HARDWARE_COLUMNS} cột.",
+        )
+    if len(dataframe.index) > MAX_HARDWARE_ROWS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File vượt quá giới hạn {MAX_HARDWARE_ROWS:,} dòng.",
         )
 
     return dataframe
+
+
+async def _read_hardware_upload(
+    file: UploadFile,
+    *,
+    allow_documents: bool = False,
+) -> pd.DataFrame:
+    if not file.filename:
+        _validate_hardware_filename(None, allow_documents=allow_documents)
+    content = await _read_upload_content(file)
+    return await run_in_threadpool(
+        _parse_hardware_content,
+        file.filename or "",
+        content,
+        allow_documents=allow_documents,
+    )
 
 
 def _save_hardware_history_safely(
@@ -446,7 +556,7 @@ def _save_hardware_history_safely(
     source_filename: str | None = None,
     dataset_id: str | None = None,
     source_file_sha256: str | None = None,
-) -> None:
+) -> int | None:
     """Save analysis history without breaking a successful analysis response."""
     try:
         encoded_result = jsonable_encoder(result_data)
@@ -456,7 +566,7 @@ def _save_hardware_history_safely(
             if isinstance(summary_value, str)
             else None
         )
-        create_analysis_history(
+        history = create_analysis_history(
             db,
             analysis_type=analysis_type,
             title=title,
@@ -470,11 +580,13 @@ def _save_hardware_history_safely(
             result_data=encoded_result,
             creator_user_id=creator_user_id,
         )
+        return history.id
     except Exception:
         logger.exception(
             "Could not save hardware analysis history: %s",
             analysis_type,
         )
+        return None
 
 
 def _upload_sha256(file: UploadFile) -> str:
@@ -486,7 +598,18 @@ def _upload_sha256(file: UploadFile) -> str:
     return digest.hexdigest()
 
 
-@router.post("/analyze")
+@router.post(
+    "/analyze",
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "hardware-analysis",
+                limit=10,
+                window_seconds=60,
+            )
+        )
+    ],
+)
 async def analyze_hardware(
     file: UploadFile = File(...),
     custom_prompt: str = Form(default="", max_length=2000),
@@ -498,7 +621,10 @@ async def analyze_hardware(
             file,
             allow_documents=True,
         )
-        response = analyze_hardware_dataframe(dataframe)
+        response = await run_in_threadpool(
+            analyze_hardware_dataframe,
+            dataframe,
+        )
         if custom_prompt.strip():
             try:
                 response["custom_prompt_response"] = (
@@ -538,7 +664,268 @@ async def analyze_hardware(
         ) from error
 
 
-@router.post("/compare")
+@router.post(
+    "/jobs",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "hardware-analysis-jobs",
+                limit=10,
+                window_seconds=60,
+            )
+        )
+    ],
+)
+async def create_hardware_analysis_job(
+    file: UploadFile = File(...),
+    custom_prompt: str = Form(default="", max_length=2000),
+    plant_id: int | None = Form(default=None, gt=0),
+    db: Session = Depends(get_db),
+    user: AlertUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    if not settings.HARDWARE_ANALYSIS_JOBS_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Phân tích nền hiện chưa được bật.",
+        )
+
+    _validate_hardware_filename(file.filename, allow_documents=True)
+    if plant_id is not None:
+        if db.get(Plant, plant_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Không tìm thấy nhà máy.",
+            )
+        require_plant_access(db, user, plant_id)
+    content = await _read_upload_content(file)
+    job = enqueue_hardware_analysis_job(
+        db,
+        owner_user_id=user.id,
+        filename=Path(file.filename or "").name,
+        content=content,
+        custom_prompt=custom_prompt.strip(),
+        plant_id=plant_id,
+    )
+    return serialize_hardware_analysis_job(job, include_result=False)
+
+
+@router.get("/jobs")
+def list_hardware_analysis_jobs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50),
+    db: Session = Depends(get_db),
+    user: AlertUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    statement = select(HardwareAnalysisJob)
+    count_statement = select(func.count()).select_from(HardwareAnalysisJob)
+    if user.role != "admin":
+        owner_filter = HardwareAnalysisJob.owner_user_id == user.id
+        statement = statement.where(owner_filter)
+        count_statement = count_statement.where(owner_filter)
+
+    total = db.scalar(count_statement) or 0
+    jobs = db.scalars(
+        statement
+        .options(
+            load_only(
+                HardwareAnalysisJob.id,
+                HardwareAnalysisJob.status,
+                HardwareAnalysisJob.stage,
+                HardwareAnalysisJob.progress,
+                HardwareAnalysisJob.source_filename,
+                HardwareAnalysisJob.plant_id,
+                HardwareAnalysisJob.attempt_count,
+                HardwareAnalysisJob.error_code,
+                HardwareAnalysisJob.error_message,
+                HardwareAnalysisJob.created_at,
+                HardwareAnalysisJob.started_at,
+                HardwareAnalysisJob.updated_at,
+                HardwareAnalysisJob.completed_at,
+            )
+        )
+        .order_by(
+            HardwareAnalysisJob.created_at.desc(),
+            HardwareAnalysisJob.id.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    return {
+        "items": [
+            serialize_hardware_analysis_job(job, include_result=False)
+            for job in jobs
+        ],
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": (total + page_size - 1) // page_size,
+        },
+    }
+
+
+@router.get("/jobs/{job_id}")
+def get_hardware_analysis_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: AlertUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    try:
+        normalized_job_id = str(UUID(job_id))
+    except ValueError as error:
+        raise HTTPException(
+            status_code=404,
+            detail="Không tìm thấy tác vụ phân tích.",
+        ) from error
+
+    statement = select(HardwareAnalysisJob).where(
+        HardwareAnalysisJob.id == normalized_job_id
+    )
+    statement = statement.options(
+        load_only(
+            HardwareAnalysisJob.id,
+            HardwareAnalysisJob.owner_user_id,
+            HardwareAnalysisJob.status,
+            HardwareAnalysisJob.stage,
+            HardwareAnalysisJob.progress,
+            HardwareAnalysisJob.source_filename,
+            HardwareAnalysisJob.plant_id,
+            HardwareAnalysisJob.attempt_count,
+            HardwareAnalysisJob.error_code,
+            HardwareAnalysisJob.error_message,
+            HardwareAnalysisJob.result_data,
+            HardwareAnalysisJob.created_at,
+            HardwareAnalysisJob.started_at,
+            HardwareAnalysisJob.updated_at,
+            HardwareAnalysisJob.completed_at,
+        )
+    )
+    if user.role != "admin":
+        statement = statement.where(
+            HardwareAnalysisJob.owner_user_id == user.id
+        )
+    job = db.scalar(statement)
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Không tìm thấy tác vụ phân tích.",
+        )
+    return serialize_hardware_analysis_job(job)
+
+
+def process_hardware_analysis_job(job_id: str) -> None:
+    with SessionLocal() as db:
+        job = db.get(HardwareAnalysisJob, job_id)
+        if job is None or job.status != "running" or job.input_file is None:
+            raise RuntimeError("Queued hardware analysis job is incomplete.")
+        filename = job.source_filename
+        content = bytes(job.input_file)
+        custom_prompt = job.custom_prompt
+        owner_user_id = job.owner_user_id
+        plant_id = job.plant_id
+        source_sha256 = job.source_file_sha256
+
+    try:
+        update_hardware_analysis_job_stage(
+            job_id,
+            stage="reading_file",
+            progress=10,
+        )
+        dataframe = _parse_hardware_content(
+            filename,
+            content,
+            allow_documents=True,
+        )
+        update_hardware_analysis_job_stage(
+            job_id,
+            stage="calculating_kpis",
+            progress=35,
+        )
+        response = analyze_hardware_dataframe(dataframe)
+        if custom_prompt:
+            update_hardware_analysis_job_stage(
+                job_id,
+                stage="generating_ai_explanation",
+                progress=75,
+            )
+            try:
+                response["custom_prompt_response"] = (
+                    generate_custom_hardware_response(
+                        dict(response),
+                        custom_prompt,
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "Hardware custom prompt response failed: job_id=%s",
+                    job_id,
+                )
+                response["custom_prompt_error"] = (
+                    "Không thể tạo phản hồi theo prompt riêng. "
+                    "Kết quả phân tích chính vẫn được giữ nguyên."
+                )
+
+        with SessionLocal() as db:
+            job = db.scalar(
+                select(HardwareAnalysisJob)
+                .where(HardwareAnalysisJob.id == job_id)
+                .with_for_update()
+            )
+            if job is None or job.status != "running":
+                return
+
+            encoded_result = jsonable_encoder(response)
+            summary_value = encoded_result.get("summary")
+            history = AnalysisHistory(
+                analysis_type="hardware_analysis",
+                title="Phân tích dữ liệu phần cứng",
+                summary=summary_value if isinstance(summary_value, str) else None,
+                source_filename=filename,
+                result_data=encoded_result,
+                creator_user_id=owner_user_id,
+                plant_id=plant_id,
+                source_file_sha256=source_sha256,
+                algorithm_version="hardware-analysis-v1",
+                ai_status=encoded_result.get("ai_status"),
+                evidence=encoded_result.get("evidence"),
+            )
+            db.add(history)
+            db.flush()
+            response["analysis_history_id"] = history.id
+
+            job.status = "succeeded"
+            job.stage = "completed"
+            job.progress = 100
+            job.result_data = jsonable_encoder(response)
+            job.input_file = None
+            job.custom_prompt = ""
+            job.error_code = None
+            job.error_message = None
+            job.lease_expires_at = None
+            job.completed_at = datetime.now(timezone.utc)
+            db.commit()
+    except Exception as error:
+        logger.error(
+            "Hardware analysis job failed: job_id=%s error_type=%s",
+            job_id,
+            type(error).__name__,
+        )
+        fail_hardware_analysis_job(job_id, error)
+
+
+@router.post(
+    "/compare",
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "hardware-compare",
+                limit=30,
+                window_seconds=60,
+            )
+        )
+    ],
+)
 async def compare_hardware(
     file: UploadFile = File(...),
     model_a: str = Form(...),
@@ -591,7 +978,18 @@ async def compare_hardware(
         ) from error
 
 
-@router.post("/compare-periods")
+@router.post(
+    "/compare-periods",
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "hardware-compare-periods",
+                limit=30,
+                window_seconds=60,
+            )
+        )
+    ],
+)
 async def compare_hardware_periods_endpoint(
     file: UploadFile = File(...),
     period_a_start: date = Form(...),
@@ -653,7 +1051,18 @@ def export_hardware_report(
     )
 
 
-@router.post("/analyze-multiple")
+@router.post(
+    "/analyze-multiple",
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "hardware-multi-file-analysis",
+                limit=10,
+                window_seconds=60,
+            )
+        )
+    ],
+)
 async def analyze_hardware_multiple(
     files: list[UploadFile] = File(
         ...,
@@ -665,6 +1074,7 @@ async def analyze_hardware_multiple(
             }
         },
     ),
+    db: Session = Depends(get_db),
     user: AlertUser = Depends(get_current_user),
 ):
     """Normalize, validate, and merge uploaded hardware files."""
@@ -680,13 +1090,38 @@ async def analyze_hardware_multiple(
             detail=f"Chỉ hỗ trợ tối đa {MAX_MULTIPLE_FILES} file mỗi lần.",
         )
 
+    known_sizes = [file.size for file in files]
+    if all(size is not None for size in known_sizes) and sum(
+        size or 0 for size in known_sizes
+    ) > MAX_MULTIPLE_TOTAL_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "Tổng dung lượng tải lên không được vượt quá 25MB mỗi lần."
+            ),
+        )
+
     upload_results = []
+    total_uploaded_bytes = 0
+    total_rows = 0
 
     for file in files:
         filename = file.filename or "File không tên"
         try:
-            dataframe = await _read_hardware_upload(file)
+            remaining_size = MAX_MULTIPLE_TOTAL_SIZE - total_uploaded_bytes
+            content = await _read_upload_content_with_limit(
+                file,
+                min(MAX_FILE_SIZE, remaining_size),
+            )
+            total_uploaded_bytes += len(content)
+            dataframe = await run_in_threadpool(
+                _parse_hardware_content,
+                filename,
+                content,
+            )
         except HTTPException as error:
+            if error.status_code == 413 and "Tổng dung lượng" in str(error.detail):
+                raise
             upload_results.append(
                 {
                     "filename": filename,
@@ -705,6 +1140,15 @@ async def analyze_hardware_multiple(
                 }
             )
         else:
+            total_rows += len(dataframe.index)
+            if total_rows > MAX_MULTIPLE_TOTAL_ROWS:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        "Tổng số dòng vượt quá giới hạn "
+                        f"{MAX_MULTIPLE_TOTAL_ROWS:,} dòng mỗi lần."
+                    ),
+                )
             upload_results.append(
                 {
                     "filename": filename,
@@ -714,14 +1158,18 @@ async def analyze_hardware_multiple(
 
     result = normalize_hardware_files(upload_results)
     merged = merge_normalized_hardware_files(result)
-    dataset_id = (
-        store_merged_hardware_dataset(
-            merged.dataframe,
-            owner_user_id=user.id,
+    try:
+        dataset_id = (
+            store_merged_hardware_dataset(
+                merged.dataframe,
+                owner_user_id=user.id,
+                db=db,
+            )
+            if merged.report["files_merged"] > 0
+            else None
         )
-        if merged.report["files_merged"] > 0
-        else None
-    )
+    except DatasetCacheCapacityError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
     normalized_files = []
     for prepared_file, file_report in zip(
         result.files,
@@ -765,8 +1213,13 @@ async def analyze_hardware_multiple(
                 column: _json_safe_cell(value)
                 for column, value in row.items()
             }
-            for row in merged.dataframe.to_dict(orient="records")
+            for row in merged.dataframe.head(
+                MAX_MERGED_RESPONSE_ROWS
+            ).to_dict(orient="records")
         ],
+        "merged_rows_truncated": (
+            len(merged.dataframe.index) > MAX_MERGED_RESPONSE_ROWS
+        ),
         "files": normalized_files,
     }
 
@@ -781,6 +1234,7 @@ async def analyze_hardware_trend(
         request.dataset_id,
         user_id=user.id,
         is_admin=user.role == "admin",
+        db=db,
     )
     if dataframe is None:
         raise HTTPException(
@@ -842,6 +1296,7 @@ def evaluate_hardware_intervention_endpoint(
         request.dataset_id,
         user_id=user.id,
         is_admin=user.role == "admin",
+        db=db,
     )
     if dataframe is None:
         raise HTTPException(

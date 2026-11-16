@@ -8,7 +8,7 @@ import pandas as pd
 from docx import Document
 from fastapi.testclient import TestClient
 from google.genai import errors
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -17,6 +17,7 @@ from app.database.connection import get_db
 from app.config import settings
 from app.main import app
 from app.models import AnalysisHistory
+from app.models.monitoring import AlertUser
 from app.services.analysis_history_service import create_analysis_history
 from app.services.multi_file_service import store_merged_hardware_dataset
 
@@ -102,6 +103,16 @@ class AnalysisHistoryAPITests(unittest.TestCase):
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 
+    def _store_dataset(self, dataframe: pd.DataFrame) -> str:
+        with Session(self.engine) as session:
+            owner_user_id = session.scalar(select(AlertUser.id))
+            assert owner_user_id is not None
+            return store_merged_hardware_dataset(
+                dataframe,
+                owner_user_id=owner_user_id,
+                db=session,
+            )
+
     def _create_history(
         self,
         *,
@@ -125,14 +136,35 @@ class AnalysisHistoryAPITests(unittest.TestCase):
         self._create_history(analysis_type="production", title="Other type")
         latest = self._create_history(title="Latest")
 
-        response = self.client.get(
-            "/api/history",
-            params={
-                "page": 1,
-                "page_size": 1,
-                "analysis_type": "hardware",
-            },
-        )
+        statements = []
+
+        def capture_statement(
+            _connection,
+            _cursor,
+            statement,
+            _parameters,
+            _context,
+            _executemany,
+        ):
+            if "FROM analysis_history" in statement:
+                statements.append(statement)
+
+        event.listen(self.engine, "before_cursor_execute", capture_statement)
+        try:
+            response = self.client.get(
+                "/api/history",
+                params={
+                    "page": 1,
+                    "page_size": 1,
+                    "analysis_type": "hardware",
+                },
+            )
+        finally:
+            event.remove(
+                self.engine,
+                "before_cursor_execute",
+                capture_statement,
+            )
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -145,6 +177,9 @@ class AnalysisHistoryAPITests(unittest.TestCase):
         self.assertEqual(data["items"][0]["id"], latest.id)
         self.assertNotIn("result_data", data["items"][0])
         self.assertNotEqual(first.id, latest.id)
+        list_query = statements[-1].casefold()
+        self.assertNotIn("result_data", list_query)
+        self.assertNotIn("evidence", list_query)
 
     def test_history_detail_includes_result_and_missing_id_is_404(self):
         history = self._create_history(
@@ -453,7 +488,7 @@ class AnalysisHistoryAPITests(unittest.TestCase):
             self.assertEqual(history.result_data["ai_status"], "available")
 
     def test_hardware_trend_saves_history_and_dataset_id(self):
-        dataset_id = store_merged_hardware_dataset(
+        dataset_id = self._store_dataset(
             pd.DataFrame(
                 {
                     "Date": ["2026-10-01"],

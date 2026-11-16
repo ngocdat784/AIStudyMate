@@ -16,7 +16,7 @@ type AuthUser = {
   role: string;
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export default function AuthNavigation() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -83,6 +83,9 @@ export default function AuthNavigation() {
   return (
     <div className="site-navigation">
       <nav aria-label="Điều hướng chính">
+        <Link href="/dashboard" onClick={handleProtectedNavigation}>
+          Tổng quan
+        </Link>
         <Link href="/monitoring" onClick={handleProtectedNavigation}>
           Giám sát
         </Link>
@@ -91,6 +94,12 @@ export default function AuthNavigation() {
         </Link>
         <Link href="/reports" onClick={handleProtectedNavigation}>
           Báo cáo
+        </Link>
+        <Link href="/integrations" onClick={handleProtectedNavigation}>
+          Tích hợp dữ liệu
+        </Link>
+        <Link href="/improvements" onClick={handleProtectedNavigation}>
+          Cải tiến
         </Link>
       </nav>
       {user ? (

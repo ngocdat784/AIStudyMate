@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
     DateTime,
     Index,
     Integer,
+    Numeric,
     JSON,
     String,
     Text,
@@ -99,6 +101,21 @@ class AIAuditLog(Base):
 
     duration_ms: Mapped[int | None] = mapped_column(
         Integer,
+        nullable=True,
+    )
+
+    input_tokens: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    output_tokens: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    estimated_cost_usd: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 6),
         nullable=True,
     )
 

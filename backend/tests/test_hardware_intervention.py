@@ -16,6 +16,7 @@ from app.database.base import Base
 from app.database.connection import get_db
 from app.main import app
 from app.models import AnalysisHistory
+from app.models.monitoring import AlertUser
 from app.services.hardware_ai_service import (
     GEMINI_MODEL,
     explain_hardware_intervention,
@@ -350,8 +351,18 @@ class HardwareInterventionEndpointTests(unittest.TestCase):
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 
+    def _store_dataset(self, dataframe: pd.DataFrame) -> str:
+        with Session(self.engine) as session:
+            owner_user_id = session.scalar(select(AlertUser.id))
+            assert owner_user_id is not None
+            return store_merged_hardware_dataset(
+                dataframe,
+                owner_user_id=owner_user_id,
+                db=session,
+            )
+
     def test_endpoint_evaluates_and_saves_intervention_history(self):
-        dataset_id = store_merged_hardware_dataset(
+        dataset_id = self._store_dataset(
             pd.DataFrame(
                 {
                     "Date": ["2026-10-01", "2026-10-03"],
@@ -433,7 +444,7 @@ class HardwareInterventionEndpointTests(unittest.TestCase):
             "/api/hardware/evaluate-intervention",
             json={
                 **valid_dates,
-                "dataset_id": store_merged_hardware_dataset(
+                "dataset_id": self._store_dataset(
                     pd.DataFrame(
                         {
                             "Date": ["2026-10-01"],

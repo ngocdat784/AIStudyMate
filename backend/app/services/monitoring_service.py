@@ -486,6 +486,8 @@ def _emit_alert(
 def evaluate_monitoring_dataset(
     db: Session,
     dataset: MonitoringDataset,
+    *,
+    commit: bool = True,
 ) -> dict[str, int]:
     records = dataset.data_rows
     if not records:
@@ -626,7 +628,8 @@ def evaluate_monitoring_dataset(
         emitted += 1
 
     dataset.last_checked_at = datetime.now(timezone.utc)
-    db.commit()
+    if commit:
+        db.commit()
     return {"evaluated_periods": 1, "alerts_detected": emitted}
 
 

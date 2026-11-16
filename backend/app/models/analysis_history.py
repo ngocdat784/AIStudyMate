@@ -13,6 +13,19 @@ class AnalysisHistory(Base):
     __tablename__ = "analysis_history"
     __table_args__ = (
         Index("ix_analysis_history_dataset_created", "dataset_id", "created_at"),
+        Index(
+            "ix_analysis_history_creator_created_id",
+            "creator_user_id",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_analysis_history_type_created_id",
+            "analysis_type",
+            "created_at",
+            "id",
+        ),
+        Index("ix_analysis_history_created_id", "created_at", "id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -48,4 +61,3 @@ class AnalysisHistory(Base):
         server_default=func.now(),
         index=True,
     )
-

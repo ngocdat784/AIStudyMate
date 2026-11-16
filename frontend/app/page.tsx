@@ -5,6 +5,7 @@ import {
   ChangeEvent,
   FormEvent,
   MouseEvent,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -18,6 +19,11 @@ type KPI = {
   value: number | string;
   unit: string;
   description: string;
+};
+
+type AccessiblePlant = {
+  id: number;
+  name: string;
 };
 
 type PerformanceItem = {
@@ -217,6 +223,30 @@ type HardwareResult = {
   ai_analysis: AIAnalysis;
   custom_prompt_response?: string;
   custom_prompt_error?: string;
+  analysis_history_id?: number | null;
+};
+
+type HardwareAnalysisJob = {
+  id: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  stage: string;
+  progress: number;
+  error_message?: string | null;
+  result_data?: HardwareResult;
+};
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "";
+
+const JOB_STAGE_LABELS: Record<string, string> = {
+  queued: "Đang chờ worker",
+  starting: "Đang khởi tạo",
+  reading_file: "Đang đọc và kiểm tra file",
+  calculating_kpis: "Đang tính KPI và phân tích dữ liệu",
+  generating_ai_explanation: "Đang tạo diễn giải AI",
+  retry_wait: "Đang chờ tự động thử lại",
+  completed: "Phân tích hoàn tất",
+  failed: "Phân tích thất bại",
 };
 
 type ComparedModel = {
@@ -723,6 +753,15 @@ export default function Home() {
   const [selectedFile, setSelectedFile] =
     useState<File | null>(null);
 
+  const [accessiblePlants, setAccessiblePlants] =
+    useState<AccessiblePlant[]>([]);
+
+  const [selectedPlantId, setSelectedPlantId] =
+    useState("");
+
+  const [plantLoadError, setPlantLoadError] =
+    useState("");
+
   const [customPrompt, setCustomPrompt] =
     useState("");
 
@@ -731,6 +770,15 @@ export default function Home() {
 
   const [loading, setLoading] =
     useState(false);
+
+  const [analysisProgress, setAnalysisProgress] =
+    useState<number | null>(null);
+
+  const [analysisStage, setAnalysisStage] =
+    useState("queued");
+
+  const [analysisJobId, setAnalysisJobId] =
+    useState("");
 
   const [error, setError] =
     useState("");
@@ -795,6 +843,39 @@ export default function Home() {
   const [interventionError, setInterventionError] = useState("");
   const [interventionResult, setInterventionResult] =
     useState<HardwareInterventionResult | null>(null);
+
+  useEffect(() => {
+    if (!hasAuthToken()) {
+      return;
+    }
+
+    let active = true;
+    apiFetch(`${API_BASE_URL}/api/monitoring/plants`, {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Không thể tải danh sách nhà máy.");
+        }
+        return (await response.json()) as AccessiblePlant[];
+      })
+      .then((plants) => {
+        if (active) {
+          setAccessiblePlants(plants);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setPlantLoadError(
+            "Không thể tải danh sách nhà máy được phân quyền."
+          );
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // --------------------------------
   // File
@@ -918,7 +999,7 @@ export default function Home() {
       });
 
       const response = await apiFetch(
-        "http://127.0.0.1:8000/api/hardware/analyze-multiple",
+        "/api/hardware/analyze-multiple",
         {
           method: "POST",
           body: formData,
@@ -976,7 +1057,7 @@ export default function Home() {
 
     try {
       const response = await apiFetch(
-        "http://127.0.0.1:8000/api/hardware/trends",
+        "/api/hardware/trends",
         {
           method: "POST",
           headers: {
@@ -1056,7 +1137,7 @@ export default function Home() {
 
     try {
       const response = await apiFetch(
-        "http://127.0.0.1:8000/api/hardware/evaluate-intervention",
+        "/api/hardware/evaluate-intervention",
         {
           method: "POST",
           headers: {
@@ -1147,6 +1228,9 @@ export default function Home() {
     }
 
     setLoading(true);
+    setAnalysisProgress(0);
+    setAnalysisStage("queued");
+    setAnalysisJobId("");
     setError("");
     setResult(null);
     setExportError("");
@@ -1160,23 +1244,25 @@ export default function Home() {
         selectedFile
       );
       formData.append("custom_prompt", customPrompt);
+      if (selectedPlantId) {
+        formData.append("plant_id", selectedPlantId);
+      }
 
-      const response =
+      const enqueueResponse =
         await apiFetch(
-          "http://127.0.0.1:8000/api/hardware/analyze",
+          `${API_BASE_URL}/api/hardware/jobs`,
           {
             method: "POST",
             body: formData,
           }
         );
 
-      if (!response.ok) {
+      if (!enqueueResponse.ok) {
         let message =
-          "Không thể phân tích dữ liệu phần cứng.";
+          "Không thể đưa file vào hàng đợi phân tích.";
 
         try {
-          const data =
-            await response.json();
+          const data = await enqueueResponse.json();
 
           if (data.detail) {
             message = data.detail;
@@ -1188,10 +1274,49 @@ export default function Home() {
         throw new Error(message);
       }
 
-      const data: HardwareResult =
-        await response.json();
+      let job: HardwareAnalysisJob =
+        await enqueueResponse.json();
+      setAnalysisJobId(job.id);
+      setAnalysisProgress(job.progress);
+      setAnalysisStage(job.stage);
+      const deadline = Date.now() + 30 * 60 * 1000;
 
+      while (job.status === "queued" || job.status === "running") {
+        if (Date.now() >= deadline) {
+          throw new Error(
+            `Tác vụ ${job.id} vẫn đang xử lý ở nền. Hãy lưu mã tác vụ để tra cứu trạng thái.`
+          );
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1200));
+        const statusResponse = await apiFetch(
+          `${API_BASE_URL}/api/hardware/jobs/${job.id}`,
+          { cache: "no-store" }
+        );
+        if (!statusResponse.ok) {
+          throw new Error(
+            "Không thể cập nhật trạng thái tác vụ. Vui lòng thử tải lại trang."
+          );
+        }
+        job = await statusResponse.json();
+        setAnalysisProgress(job.progress);
+        setAnalysisStage(job.stage);
+      }
+
+      if (job.status === "failed") {
+        throw new Error(
+          job.error_message ?? "Không thể hoàn tất phân tích file."
+        );
+      }
+      if (!job.result_data) {
+        throw new Error(
+          "Tác vụ đã kết thúc nhưng không có kết quả phân tích."
+        );
+      }
+
+      const data = job.result_data;
       setResult(data);
+      setAnalysisProgress(100);
+      setAnalysisStage("completed");
       const availableModels = Array.from(
         new Set(
           data.model_performance
@@ -1259,7 +1384,7 @@ export default function Home() {
       formData.append("model_b", selectedModelB);
 
       const response = await apiFetch(
-        "http://127.0.0.1:8000/api/hardware/compare",
+        "/api/hardware/compare",
         {
           method: "POST",
           body: formData,
@@ -1703,6 +1828,31 @@ export default function Home() {
               </small>
             </label>
 
+            {accessiblePlants.length > 0 && (
+              <label className="custom-prompt-field">
+                <span>Nhà máy cho lịch sử và báo cáo (không bắt buộc)</span>
+                <select
+                  value={selectedPlantId}
+                  onChange={(event) =>
+                    setSelectedPlantId(event.target.value)
+                  }
+                  disabled={loading || comparisonLoading}
+                >
+                  <option value="">Không gắn nhà máy</option>
+                  {accessiblePlants.map((plant) => (
+                    <option key={plant.id} value={plant.id}>
+                      {plant.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {plantLoadError && (
+              <p className="error-box" role="status">
+                {plantLoadError}
+              </p>
+            )}
+
 
 
             {error && (
@@ -1719,6 +1869,24 @@ export default function Home() {
               </div>
             )}
 
+            {loading && (
+              <div className="analysis-job-progress" aria-live="polite">
+                <div className="analysis-job-progress-heading">
+                  <strong>
+                    {JOB_STAGE_LABELS[analysisStage] ?? "Đang xử lý"}
+                  </strong>
+                  <span>{analysisProgress ?? 0}%</span>
+                </div>
+                <progress
+                  max={100}
+                  value={analysisProgress ?? 0}
+                  aria-label="Tiến trình phân tích"
+                />
+                {analysisJobId && (
+                  <small>Mã tác vụ: {analysisJobId}</small>
+                )}
+              </div>
+            )}
 
 
             <div className="upload-footer">

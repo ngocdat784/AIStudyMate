@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AUTH_CHANGED_EVENT, notifyAuthChanged } from "../../lib/auth";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 type User = {
   id: number;
@@ -978,7 +978,7 @@ export default function MonitoringPage() {
         </section>
       )}
 
-      <section style={{ ...styles.panel, marginBottom: 16 }}>
+      <section id="alert-center" style={{ ...styles.panel, marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <h2>Cảnh báo</h2>
           <select aria-label="Lọc loại cảnh báo" value={filterType} onChange={(event) => setFilterType(event.target.value)} style={{ ...styles.input, maxWidth: 220 }}>

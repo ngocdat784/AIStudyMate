@@ -1,6 +1,6 @@
 export const AUTH_CHANGED_EVENT = "monitoring-auth-changed";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 let loginRedirectStarted = false;
 
 export function notifyAuthChanged() {

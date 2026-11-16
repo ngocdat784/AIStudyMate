@@ -4,6 +4,7 @@ import sys
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
+from app.config import settings
 from app.services.monitoring_service import (
     deliver_pending_alert_notifications,
     evaluate_due_datasets,
@@ -74,3 +75,20 @@ def stop_scheduler() -> None:
         context = _scheduler_lock_context
         _scheduler_lock_context = None
         context.__exit__(None, None, None)
+
+
+def get_monitoring_scheduler_status() -> dict:
+    jobs = scheduler.get_jobs()
+    return {
+        "enabled": settings.ALERT_SCHEDULER_ENABLED,
+        "running_on_this_process": scheduler.running,
+        "scheduled_jobs": len(jobs),
+        "next_run_at": min(
+            (
+                job.next_run_time.isoformat()
+                for job in jobs
+                if getattr(job, "next_run_time", None) is not None
+            ),
+            default=None,
+        ),
+    }

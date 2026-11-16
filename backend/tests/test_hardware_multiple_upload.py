@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pandas as pd
 from docx import Document
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from reportlab.pdfgen import canvas
 
@@ -13,6 +14,8 @@ from auth_test_helpers import clear_admin_auth_override, override_admin_auth
 from app.routes.hardware import (
     MAX_FILE_SIZE,
     MAX_MULTIPLE_FILES,
+    MAX_MULTIPLE_TOTAL_ROWS,
+    _parse_hardware_content,
     _read_csv_robust,
     _read_docx_hardware_tables,
     _read_pdf_hardware_tables,
@@ -100,6 +103,16 @@ class HardwareMultipleUploadTests(unittest.TestCase):
         self.assertEqual(dataframe.shape, (2, 5))
         self.assertEqual(dataframe.iloc[0]["Model"], "ProBook X1")
         self.assertEqual(dataframe.iloc[1]["Production"], "200")
+
+    def test_parser_rejects_more_than_the_configured_row_limit(self):
+        content = b"Date,Production\n2026-10-01,10\n2026-10-02,20\n"
+
+        with patch("app.routes.hardware.MAX_HARDWARE_ROWS", 1):
+            with self.assertRaises(HTTPException) as error:
+                _parse_hardware_content("production.csv", content)
+
+        self.assertEqual(error.exception.status_code, 413)
+        self.assertIn("1 dòng", error.exception.detail)
 
     def test_docx_table_is_read_as_hardware_data(self):
         document = Document()
@@ -514,6 +527,98 @@ class HardwareMultipleUploadTests(unittest.TestCase):
         self.assertEqual(payload["files_failed"], 1)
         self.assertIn("too-large.csv", payload["file_reports"][1]["filename"])
         self.assertIn("10MB", payload["file_reports"][1]["error"])
+
+    def test_multiple_upload_total_size_is_bounded(self):
+        with patch(
+            "app.routes.hardware.MAX_MULTIPLE_TOTAL_SIZE",
+            20,
+        ):
+            response = self.client.post(
+                "/api/hardware/analyze-multiple",
+                files=[
+                    ("files", ("first.csv", b"Date,Production\n", "text/csv")),
+                    ("files", ("second.csv", b"Date,Production\n", "text/csv")),
+                ],
+            )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("Tổng dung lượng", response.json()["detail"])
+
+    def test_multiple_upload_total_rows_are_bounded(self):
+        with patch(
+            "app.routes.hardware.MAX_MULTIPLE_TOTAL_ROWS",
+            1,
+        ):
+            response = self.client.post(
+                "/api/hardware/analyze-multiple",
+                files=[
+                    (
+                        "files",
+                        ("first.csv", b"Date,Production\n2026-10-01,10\n", "text/csv"),
+                    ),
+                    (
+                        "files",
+                        ("second.csv", b"Date,Production\n2026-10-02,20\n", "text/csv"),
+                    ),
+                ],
+            )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertIn(
+            "vượt quá giới hạn 1 dòng",
+            response.json()["detail"],
+        )
+
+    def test_large_merged_response_is_truncated_with_indicator(self):
+        with patch("app.routes.hardware.MAX_MERGED_RESPONSE_ROWS", 1):
+            response = self.client.post(
+                "/api/hardware/analyze-multiple",
+                files=[
+                    (
+                        "files",
+                        (
+                            "first.csv",
+                            b"Date,Product,Production\n2026-10-01,A,10\n",
+                            "text/csv",
+                        ),
+                    ),
+                    (
+                        "files",
+                        (
+                            "second.csv",
+                            b"Date,Product,Production\n2026-10-02,B,20\n",
+                            "text/csv",
+                        ),
+                    ),
+                ],
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(len(payload["merged_rows"]), 1)
+        self.assertTrue(payload["merged_rows_truncated"])
+
+    def test_dataset_cache_rejects_a_dataset_over_its_memory_budget(self):
+        with patch(
+            "app.services.multi_file_service.MAX_CACHED_DATASET_BYTES",
+            1,
+        ):
+            response = self.client.post(
+                "/api/hardware/analyze-multiple",
+                files=[
+                    (
+                        "files",
+                        ("first.csv", b"Date,Product,Production\n2026-10-01,A,10\n", "text/csv"),
+                    ),
+                    (
+                        "files",
+                        ("second.csv", b"Date,Product,Production\n2026-10-02,B,20\n", "text/csv"),
+                    ),
+                ],
+            )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("bộ nhớ tạm", response.json()["detail"])
 
     def test_missing_required_column_fails_only_that_file(self):
         response = self.client.post(

@@ -99,6 +99,9 @@ def finish_ai_audit_log(
     validated_result: dict[str, Any] | None = None,
     error: Exception | None = None,
     duration_ms: int | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    estimated_cost_usd: float | None = None,
 ) -> bool:
     """
     Update an existing audit record after AI processing.
@@ -158,6 +161,9 @@ def finish_ai_audit_log(
 
         if duration_ms is not None:
             record.duration_ms = max(0, duration_ms)
+        record.input_tokens = input_tokens
+        record.output_tokens = output_tokens
+        record.estimated_cost_usd = estimated_cost_usd
 
         db.commit()
         return True

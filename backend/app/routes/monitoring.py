@@ -66,12 +66,15 @@ from app.services.monitoring_service import (
     notification_channel_status,
     record_alert_event,
 )
+from app.services.api_rate_limit import rate_limit_dependency
 from app.services.user_audit import record_user_action
 from app.config import settings
 
 
 router = APIRouter(prefix="/api/monitoring", tags=["Intelligent Monitoring"])
 logger = logging.getLogger(__name__)
+MAX_MONITORING_UPLOAD_TOTAL_SIZE = 25 * 1024 * 1024
+MAX_MONITORING_UPLOAD_TOTAL_ROWS = 100_000
 
 
 class Credentials(BaseModel):
@@ -404,7 +407,19 @@ def _require_scope(db: Session, plant_id: int, line_id: int | None) -> None:
             )
 
 
-@router.post("/auth/signup", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/auth/signup",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "auth-signup",
+                limit=10,
+                window_seconds=60,
+            )
+        )
+    ],
+)
 def signup(request: SignupRequest, db: Session = Depends(get_db)):
     ensure_auth_configured()
     user = AlertUser(
@@ -425,7 +440,18 @@ def signup(request: SignupRequest, db: Session = Depends(get_db)):
     return {"access_token": token, "token_type": "bearer", "user": _user_json(user)}
 
 
-@router.post("/auth/login")
+@router.post(
+    "/auth/login",
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "auth-login",
+                limit=30,
+                window_seconds=60,
+            )
+        )
+    ],
+)
 def login(
     request: Credentials,
     http_request: Request,
@@ -477,7 +503,19 @@ def login(
     return {"access_token": token, "token_type": "bearer", "user": _user_json(user)}
 
 
-@router.post("/auth/bootstrap-admin", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/auth/bootstrap-admin",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "auth-bootstrap",
+                limit=5,
+                window_seconds=60,
+            )
+        )
+    ],
+)
 def bootstrap_admin(request: BootstrapRequest, db: Session = Depends(get_db)):
     ensure_auth_configured()
     configured_token = settings.ALERT_BOOTSTRAP_TOKEN
@@ -567,6 +605,7 @@ def list_sessions(
             AuthSession.expires_at > datetime.now(timezone.utc),
         )
         .order_by(AuthSession.created_at.desc())
+        .limit(100)
     ).all()
     return [
         {
@@ -636,7 +675,19 @@ def change_password(
     return {"password_changed": True, "sessions_revoked": True}
 
 
-@router.post("/auth/forgot-password", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/auth/forgot-password",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "auth-password-reset-request",
+                limit=5,
+                window_seconds=3600,
+            )
+        )
+    ],
+)
 def request_password_reset(
     request: PasswordResetRequest,
     db: Session = Depends(get_db),
@@ -676,7 +727,18 @@ def request_password_reset(
     }
 
 
-@router.post("/auth/reset-password")
+@router.post(
+    "/auth/reset-password",
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "auth-password-reset-complete",
+                limit=10,
+                window_seconds=3600,
+            )
+        )
+    ],
+)
 def reset_password(
     request: PasswordResetCompleteRequest,
     db: Session = Depends(get_db),
@@ -1653,7 +1715,19 @@ def delete_dataset(
     }
 
 
-@router.post("/datasets", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/datasets",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "monitoring-dataset-create",
+                limit=10,
+                window_seconds=60,
+            )
+        )
+    ],
+)
 def create_dataset(
     request: DatasetRequest,
     db: Session = Depends(get_db),
@@ -1697,7 +1771,19 @@ def create_dataset(
     return {**_dataset_json(dataset), **result}
 
 
-@router.post("/upload", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/upload",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "monitoring-upload",
+                limit=10,
+                window_seconds=60,
+            )
+        )
+    ],
+)
 async def upload_monitoring_snapshot(
     files: list[UploadFile] = File(...),
     plant_id: int = Form(..., gt=0),
@@ -1718,8 +1804,16 @@ async def upload_monitoring_snapshot(
     )
 
     upload_results = []
+    total_upload_size = 0
+    total_rows = 0
     for uploaded in files:
         filename = uploaded.filename or "File không tên"
+        total_upload_size += uploaded.size or 0
+        if total_upload_size > MAX_MONITORING_UPLOAD_TOTAL_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail="Tổng dung lượng tải lên vượt quá 25MB.",
+            )
         try:
             dataframe = await _read_hardware_upload(uploaded)
         except HTTPException as exc:
@@ -1733,6 +1827,12 @@ async def upload_monitoring_snapshot(
                 {"filename": filename, "error": f"Không thể đọc file: {exc}"}
             )
         else:
+            total_rows += len(dataframe.index)
+            if total_rows > MAX_MONITORING_UPLOAD_TOTAL_ROWS:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Tổng dữ liệu vượt quá 100.000 dòng.",
+                )
             upload_results.append({"filename": filename, "dataframe": dataframe})
 
     normalized = normalize_hardware_files(upload_results)

@@ -1624,6 +1624,8 @@ def analyze_hardware_deep(
         audit.fail(exc)
         raise
 
+    audit.set_usage_from_response(response)
+
     # Giai đoạn 2: kiểm định JSON, dữ liệu và chuẩn hóa nghiệp vụ.
     # Bất kỳ lỗi nào trong giai đoạn này đều là validation_failed.
     try:
@@ -1743,6 +1745,7 @@ def analyze_hardware_comparison(
         audit.fail(exc)
         raise
 
+    audit.set_usage_from_response(response)
     response_text = getattr(response, "text", None)
     audit.set_raw_response(response_text)
     if not response_text or not response_text.strip():
@@ -1805,6 +1808,7 @@ def explain_hardware_intervention(
         audit.fail(exc)
         raise
 
+    audit.set_usage_from_response(response)
     try:
         response_text = getattr(response, "text", None)
         audit.set_raw_response(response_text)
@@ -2355,6 +2359,7 @@ def analyze_hardware_trends_with_ai(
         audit.fail(exc)
         raise
 
+    audit.set_usage_from_response(response)
     response_text: str | None = None
     try:
         response_text = getattr(response, "text", None)
@@ -2362,7 +2367,7 @@ def analyze_hardware_trends_with_ai(
         if not response_text or not response_text.strip():
             raise ValueError("Gemini trả về nội dung rỗng.")
 
-        logger.info("Gemini hardware trend response: %s", response_text)
+        logger.info("Gemini hardware trend response received")
         analysis = HardwareTrendAnalysis.model_validate_json(response_text)
         _validate_hardware_trend_analysis(analysis, evidence, report)
         result = {

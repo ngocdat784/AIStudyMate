@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import "./history.css";
 
-const API_BASE_URL = "http://127.0.0.1:8000/api/history";
+const API_BASE_URL = "/api/history";
 const PAGE_SIZE = 10;
 
 type AnalysisType =
@@ -539,6 +539,56 @@ export default function HistoryPage() {
       setDetailLoadingId(null);
     }
   };
+
+  useEffect(() => {
+    const value = new URLSearchParams(window.location.search).get("history_id");
+    if (!value || !/^[1-9]\d*$/.test(value)) {
+      return;
+    }
+
+    const historyId = Number(value);
+    let active = true;
+    const timer = window.setTimeout(() => {
+      if (!Number.isSafeInteger(historyId)) {
+        setActionError("Mã lịch sử phân tích không hợp lệ.");
+        return;
+      }
+
+      setDetailLoadingId(historyId);
+      void apiFetch(`${API_BASE_URL}/${historyId}`, { cache: "no-store" })
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error(await getApiError(response));
+          }
+          return (await response.json()) as HistoryDetail;
+        })
+        .then((detail) => {
+          if (active) {
+            setSelectedHistory(detail);
+            setActionError("");
+          }
+        })
+        .catch((detailError: unknown) => {
+          console.error("Could not load linked analysis history:", detailError);
+          if (active) {
+            setActionError(
+              detailError instanceof Error
+                ? detailError.message
+                : "Không thể tải chi tiết phân tích.",
+            );
+          }
+        })
+        .finally(() => {
+          if (active) {
+            setDetailLoadingId(null);
+          }
+        });
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   const handleDelete = async (item: HistorySummary) => {
     const confirmed = window.confirm(

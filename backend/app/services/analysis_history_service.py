@@ -1,7 +1,7 @@
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.models import AnalysisHistory
 
@@ -72,6 +72,17 @@ def list_analysis_history(
     total = db.scalar(count_statement) or 0
     data_statement = (
         data_statement
+        .options(
+            load_only(
+                AnalysisHistory.id,
+                AnalysisHistory.analysis_type,
+                AnalysisHistory.title,
+                AnalysisHistory.summary,
+                AnalysisHistory.source_filename,
+                AnalysisHistory.dataset_id,
+                AnalysisHistory.created_at,
+            )
+        )
         .order_by(
             AnalysisHistory.created_at.desc(),
             AnalysisHistory.id.desc(),

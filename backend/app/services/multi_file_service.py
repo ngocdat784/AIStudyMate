@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import gzip
+import io
 import math
 import re
-import threading
-import time
 import uuid
-from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pandas as pd
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.orm import Session
+
+from app.models import HardwareDatasetCache
 
 
 CANONICAL_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
@@ -202,57 +206,138 @@ class MergedHardwareDataset:
 
 DATASET_CACHE_TTL_SECONDS = 60 * 60
 MAX_CACHED_DATASETS = 25
-_dataset_cache: OrderedDict[str, tuple[float, pd.DataFrame, int | None]] = OrderedDict()
-_dataset_cache_lock = threading.RLock()
+MAX_CACHED_DATASET_BYTES = 256 * 1024 * 1024
+
+
+class DatasetCacheCapacityError(ValueError):
+    pass
 
 
 def store_merged_hardware_dataset(
     dataframe: pd.DataFrame,
     *,
-    owner_user_id: int | None = None,
+    owner_user_id: int,
+    db: Session,
 ) -> str:
-    now = time.monotonic()
-    with _dataset_cache_lock:
-        expired_ids = [
-            dataset_id
-            for dataset_id, (created_at, _, _) in _dataset_cache.items()
-            if now - created_at >= DATASET_CACHE_TTL_SECONDS
-        ]
-        for dataset_id in expired_ids:
-            del _dataset_cache[dataset_id]
-
-        dataset_id = uuid.uuid4().hex
-        _dataset_cache[dataset_id] = (
-            now,
-            dataframe.copy(deep=True),
-            owner_user_id,
+    size_bytes = int(dataframe.memory_usage(index=True, deep=True).sum())
+    if size_bytes > MAX_CACHED_DATASET_BYTES:
+        raise DatasetCacheCapacityError(
+            "Dataset đã gộp vượt quá giới hạn bộ nhớ tạm 256MB."
         )
-        while len(_dataset_cache) > MAX_CACHED_DATASETS:
-            _dataset_cache.popitem(last=False)
-        return dataset_id
+    return _store_persistent_dataset(
+        db,
+        dataframe,
+        owner_user_id=owner_user_id,
+        size_bytes=size_bytes,
+    )
 
 
 def get_merged_hardware_dataset(
     dataset_id: str,
     *,
+    db: Session,
     user_id: int | None = None,
     is_admin: bool = False,
 ) -> pd.DataFrame | None:
-    now = time.monotonic()
-    with _dataset_cache_lock:
-        cached = _dataset_cache.get(dataset_id)
-        if cached is None:
-            return None
+    return _get_persistent_dataset(
+        db,
+        dataset_id,
+        user_id=user_id,
+        is_admin=is_admin,
+    )
 
-        created_at, dataframe, owner_user_id = cached
-        if now - created_at >= DATASET_CACHE_TTL_SECONDS:
-            del _dataset_cache[dataset_id]
-            return None
-        if owner_user_id is not None and owner_user_id != user_id and not is_admin:
-            return None
 
-        _dataset_cache.move_to_end(dataset_id)
-        return dataframe.copy(deep=True)
+def _store_persistent_dataset(
+    db: Session,
+    dataframe: pd.DataFrame,
+    *,
+    owner_user_id: int,
+    size_bytes: int,
+) -> str:
+    payload_text = dataframe.to_json(orient="table", date_format="iso")
+    payload_bytes = payload_text.encode("utf-8")
+    if len(payload_bytes) > MAX_CACHED_DATASET_BYTES:
+        raise DatasetCacheCapacityError(
+            "Dataset đã gộp vượt quá giới hạn lưu trữ tạm 256MB."
+        )
+    payload = gzip.compress(payload_bytes)
+    now = datetime.now(timezone.utc)
+    dataset_id = uuid.uuid4().hex
+
+    try:
+        if db.get_bind().dialect.name == "postgresql":
+            db.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_key)"),
+                {"lock_key": 5209352509576031048},
+            )
+        db.execute(
+            delete(HardwareDatasetCache).where(
+                HardwareDatasetCache.expires_at <= now
+            )
+        )
+        entry_count, cached_bytes = db.execute(
+            select(
+                func.count(HardwareDatasetCache.dataset_id),
+                func.coalesce(func.sum(HardwareDatasetCache.byte_size), 0),
+            )
+        ).one()
+        while entry_count >= MAX_CACHED_DATASETS or (
+            cached_bytes + size_bytes > MAX_CACHED_DATASET_BYTES
+        ):
+            oldest = db.scalar(
+                select(HardwareDatasetCache)
+                .order_by(
+                    HardwareDatasetCache.created_at,
+                    HardwareDatasetCache.dataset_id,
+                )
+                .limit(1)
+            )
+            if oldest is None:
+                break
+            cached_bytes -= oldest.byte_size
+            entry_count -= 1
+            db.delete(oldest)
+
+        db.add(
+            HardwareDatasetCache(
+                dataset_id=dataset_id,
+                owner_user_id=owner_user_id,
+                payload=payload,
+                byte_size=size_bytes,
+                expires_at=now
+                + timedelta(seconds=DATASET_CACHE_TTL_SECONDS),
+            )
+        )
+        db.commit()
+        return dataset_id
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _get_persistent_dataset(
+    db: Session,
+    dataset_id: str,
+    *,
+    user_id: int | None,
+    is_admin: bool,
+) -> pd.DataFrame | None:
+    cached = db.get(HardwareDatasetCache, dataset_id)
+    if cached is None:
+        return None
+
+    expires_at = cached.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
+        db.delete(cached)
+        db.commit()
+        return None
+    if not is_admin and cached.owner_user_id != user_id:
+        return None
+
+    payload = gzip.decompress(cached.payload).decode("utf-8")
+    return pd.read_json(io.StringIO(payload), orient="table")
 
 
 def _normalize_header(value: Any) -> str:

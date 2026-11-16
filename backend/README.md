@@ -71,3 +71,350 @@ stable idempotency key. PostgreSQL advisory locks elect one scheduler owner and
 serialize evaluation and delivery jobs across workers. Set
 `ALERT_SCHEDULER_ENABLED=false` on API workers when running a dedicated
 scheduler process.
+
+## Hardware analysis jobs
+
+Hardware analysis submitted from the main analysis page is stored in
+PostgreSQL and processed by background workers started with the FastAPI
+lifespan. The existing synchronous `POST /api/hardware/analyze` endpoint
+remains available for compatible clients; new clients should submit to
+`POST /api/hardware/jobs` and poll `GET /api/hardware/jobs/{job_id}`. Jobs are
+visible only to their owner unless the caller is an administrator. The
+paginated `GET /api/hardware/jobs` endpoint lists the caller's recent jobs.
+
+The queue uses PostgreSQL row locks and `SKIP LOCKED`; no Redis or separate
+message broker is required. Uploads are limited to 10 MB, the default global
+pending queue limit is 50, each user may have 3 pending/running jobs, and a
+failed job is retried up to 3 times. Worker concurrency defaults to 2 per API
+process, so configure it against the total number of API processes and the
+available CPU/memory. Override these defaults with:
+
+```text
+HARDWARE_ANALYSIS_JOBS_ENABLED=true
+HARDWARE_ANALYSIS_JOB_WORKERS=2
+HARDWARE_ANALYSIS_JOB_MAX_PENDING=50
+HARDWARE_ANALYSIS_JOB_MAX_PENDING_PER_USER=3
+HARDWARE_ANALYSIS_JOB_MAX_ATTEMPTS=3
+HARDWARE_ANALYSIS_JOB_POLL_SECONDS=1
+HARDWARE_ANALYSIS_JOB_LEASE_SECONDS=3600
+```
+
+Apply migrations before starting the API:
+
+```powershell
+python -m alembic upgrade head
+```
+
+The uploaded bytes and custom prompt are cleared when a job reaches a terminal
+state. The completed result remains available through the job status endpoint
+and is linked to the persisted analysis-history record.
+
+## Industrial file integrations
+
+The integration registry currently advertises only the implemented CSV/XLSX
+file connector. `GET /api/integrations/registry` describes supported target
+fields and limits; `POST /api/integrations/preview` previews headers and sample
+rows; authenticated administrators/operators can register a connector scoped
+to an accessible Plant and optional Line, configure source-to-target mapping,
+then upload a file to `POST /api/integrations/connectors/{id}/sync`.
+
+The connector requires `Date` and `Production`. Optional production fields
+include Product, Model, Component, Supplier, Batch, Defects, Downtime, Defect
+Type, Quality Status, Machine, Process, Order, and Material. Additional source
+columns can be mapped to `attributes.<field>` so the persisted dataset can
+retain source-specific attributes without adding vendor-specific database
+columns. Dates are normalized from the configured IANA time zone to UTC;
+Downtime can be provided in seconds, minutes, or hours and is stored in
+minutes. Invalid required values reject the whole file, and the sync history
+stores row/field/error-code samples without storing the invalid raw values.
+
+Successful file syncs create a Monitoring dataset, evaluate it using the
+existing Python alert pipeline, and persist the source checksum, mapping
+snapshot, normalization settings, connector, user, and dataset IDs as lineage.
+Re-uploading an already successful file with the same connector mapping and
+normalization is idempotent. Changing the mapping or normalization creates a
+new ingestion version for the same source checksum.
+
+Continuous-improvement cases are available under `/api/improvements`. Cases
+are plant-scoped and retain a baseline, assigned owner, suspected root cause,
+action, implementation time, after-measurement, confounders, and evaluation.
+KPI deltas are calculated from submitted measurements. Evidence-confidence
+labels describe documentation completeness only; they are not statistical
+confidence intervals and do not establish that an action caused the observed
+change. The `/improvements` frontend guides the case through those steps.
+
+Hardware CSV/XLSX ingestion is capped at 10 MB and 100,000 rows per file;
+multi-file requests are capped at 10 files, 25 MB combined, and 100,000 rows
+combined. Merged datasets are compressed and persisted in PostgreSQL for one
+hour so trend/intervention requests can reach any API replica. The shared cache
+evicts oldest datasets to stay within 25 entries and a 256 MiB uncompressed
+data budget; records are owner-scoped. Multi-file responses include at most
+1,000 merged-row previews (`merged_rows_truncated` indicates truncation); the
+full dataset remains available by its returned `dataset_id` until cache expiry
+or eviction.
+Alembic revision `b27f4a8d1c30` creates the shared cache table.
+Failed uploads are retained in sync history and can be retried by uploading the
+file again after correcting the source or mapping. Uploaded source files are
+not retained after processing.
+
+File sync is currently user-triggered: an uploaded file is transient and is
+not a durable polling source, so no automatic file sync scheduler or automatic
+retry loop is claimed. ERP/MES/SCADA/PLC connections, their credential
+management, and scheduled recovery should be added only after the actual
+vendor, protocol, data contract, and permitted network access are established.
+
+## 13C security and operations
+
+Configure these values per environment; do not commit `.env` files or
+credentials. Use a secret manager in staging/production. `ALERT_AUTH_SECRET`
+must be a randomly generated value of at least 32 characters. Keep the
+bootstrap token secret and remove or rotate it after the first administrator
+has been created. Configure the application URL and exact trusted frontend
+origins:
+
+```text
+APP_ENV=production
+APP_BASE_URL=https://app.example.com
+CORS_ALLOWED_ORIGINS=["https://app.example.com"]
+SECURITY_RATE_LIMITS_ENABLED=true
+```
+
+Production startup rejects a missing/short auth secret, disabled rate limits,
+a non-PostgreSQL database URL, and non-HTTPS application/CORS URLs. Apply
+Alembic migrations through `head` before deploying application instances;
+revision `c69f2a13b8d4` creates the shared rate-limit table and
+`b27f4a8d1c30` creates the shared dataset-cache table. The limiter uses atomic
+PostgreSQL upserts, so limits are shared across API processes without Redis.
+It stores an HMAC of the route and client address, not the raw address.
+Default limits are 30/minute for login, 10/minute for signup, password-reset
+completion and analysis/upload operations, and 5/hour for reset requests.
+Tune them using observed traffic and keep limits enabled for public endpoints.
+
+The application uses the direct ASGI client address. If deployed behind a
+reverse proxy, configure that proxy and the ASGI server to trust forwarded
+addresses only from known proxy IPs; never accept arbitrary client-supplied
+`X-Forwarded-For` values as identity. CORS is not an authorization boundary:
+backend authentication, role checks, and Plant/Factory/Department scope checks
+remain mandatory.
+
+Uploads are limited to 10 MB per file, with archive expansion capped at 50 MB,
+1,000 archive members, 500 tabular columns, and 100,000 rows. PDF ingestion is
+capped at 100 pages. Multi-file hardware and monitoring uploads are limited to
+10 files, 25 MB combined, and 100,000 rows combined. Production analysis uses
+the same bounded parser and runs CPU-heavy parsing/analysis outside the event
+loop. Set the reverse proxy's request-body limit to about 26 MB to reject
+oversized multipart bodies before the application parser spools them.
+
+### PostgreSQL backup and recovery
+
+Choose and document organization-specific recovery point and recovery time
+objectives, backup frequency, retention, encryption, and off-site storage.
+Backups contain sensitive production and identity data: restrict access and
+encrypt them at rest and in transit. A custom-format backup can be created
+from PowerShell with:
+
+```powershell
+pg_dump --format=custom --no-owner --file="$env:BACKUP_DIR\hardwareai.dump" "$env:DATABASE_URL"
+```
+
+Restore into a newly created, isolated recovery database (not the live
+database) and verify the restored schema and application data before relying
+on the backup:
+
+```powershell
+pg_restore --no-owner --dbname="$env:RESTORE_DATABASE_URL" "$env:BACKUP_DIR\hardwareai.dump"
+python -m alembic current
+```
+
+Run and record restore drills regularly, including verification of users,
+Plant assignments, monitoring snapshots, analysis lineage, integrations, and
+audit history. A successful dump alone does not demonstrate recoverability.
+
+## 13D logging and observability
+
+The API writes structured JSON request logs with a generated `X-Request-ID`,
+route template, HTTP status, and latency. Do not log request bodies, auth
+headers, uploaded file contents, or AI prompts/responses. Centralize stdout
+logs in the deployment's log platform and configure alerts for sustained 5xx
+rates, database readiness failures, and repeated job/integration errors. No
+external error-tracking vendor is configured by default.
+
+`GET /health/live` is a liveness probe. `GET /health/ready` checks PostgreSQL
+connectivity and returns 503 when it cannot connect. The admin-only
+`GET /api/ops/health` reports database query latency, local worker/scheduler
+state, queued/expired hardware jobs, recent integration sync status, and
+24-hour AI activity. `GET /api/ops/metrics` reports HTTP request counts,
+5xx counts, per-route latency buckets, recent throughput, and AI usage.
+Operational endpoints require an authenticated administrator; do not make
+them public through a reverse proxy.
+
+HTTP counters and latency buckets are in-memory and scoped to one application
+process. Scrape each worker/process and aggregate in the monitoring platform;
+they reset on restart and are not intended as durable billing or SLO records.
+AI audit records are persisted in PostgreSQL. Token counts are captured only
+when the provider returns usage metadata. Estimated cost is left null unless
+both model-specific rates are explicitly configured, in USD per million
+input/output tokens:
+
+```text
+GEMINI_INPUT_COST_PER_MILLION_TOKENS_USD=<configured-provider-rate>
+GEMINI_OUTPUT_COST_PER_MILLION_TOKENS_USD=<configured-provider-rate>
+```
+
+These are estimates based on returned usage and configured rates, not a
+provider invoice; retries or provider-side adjustments may not be represented.
+Apply Alembic revision `d8a4c73e19b2` before deploying this version to persist
+AI token and estimated-cost fields. The operational API reports priced-call
+coverage so a missing estimate is not presented as zero cost.
+
+## 13F Docker deployment and environments
+
+The repository root contains a multi-stage backend/frontend build and
+`compose.yaml` for PostgreSQL, a one-shot migration service, the API, and the
+Next.js frontend. PostgreSQL 18 stores data in the named `postgres_data_v18`
+volume mounted at `/var/lib/postgresql`; the database and API ports are not
+published to the host. This volume is intentionally separate from the
+PostgreSQL 16 `postgres_data` volume, which remains untouched. Compose does not
+migrate or copy existing data; back up and restore into a planned PG18
+deployment before switching if the existing database must be retained. The
+frontend is bound to `127.0.0.1:3000` by default so an HTTPS reverse proxy can
+terminate TLS and forward to it. Do not expose this port publicly without TLS
+and appropriate edge controls.
+
+For a local Compose environment, copy the example and replace the placeholder
+secrets. Keep `DATABASE_URL`'s username, password, and database synchronized
+with the `POSTGRES_*` values. Use URL-safe passwords (letters, digits, `-`,
+`_`) or percent-encode reserved characters in the connection URL. In
+PowerShell, a strong URL-safe password can be generated with:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+Copy-Item .env.example .env
+```
+
+Set development values in `.env`, then start the complete stack:
+
+```powershell
+docker compose --env-file .env config
+docker compose --env-file .env up --build -d
+docker compose --env-file .env ps
+docker compose --env-file .env logs -f backend frontend migrate
+```
+
+`migrate` waits for PostgreSQL health and applies Alembic `head`; the backend
+does not start unless that one-shot migration exits successfully. The frontend
+uses a same-origin `/api` route rewrite to the internal backend service, so
+browser requests do not embed a private container address or require a
+production `NEXT_PUBLIC_API_URL`. For direct local development outside Compose,
+the existing API URL override can still be set at frontend build/runtime as
+appropriate.
+
+Use separate environment files and independent secret values for development,
+staging, and production. Keep `.env` outside version control; production
+secrets should be injected by the deployment secret manager. Production must
+set `APP_ENV=production`, HTTPS `APP_BASE_URL`, exact HTTPS
+`CORS_ALLOWED_ORIGINS`, PostgreSQL `DATABASE_URL`, a strong
+`ALERT_AUTH_SECRET`, and `SECURITY_RATE_LIMITS_ENABLED=true`. Remove the
+bootstrap token after initial administrator creation. The frontend container
+is built with `BACKEND_INTERNAL_URL=http://backend:8000`; when deploying
+outside Compose, provide a reachable backend URL at frontend image build time.
+
+GitHub Actions runs backend tests and Alembic offline SQL validation, frontend
+lint/build, and container builds on pull requests. A successful push to `main`
+publishes immutable SHA-tagged images to GitHub Container Registry (and
+updates `latest`). Configure registry access and an environment-specific
+deployment controller to roll those images out; this repository does not
+assume a particular cloud host or automatically SSH into production.
+For a controlled rollout, set `BACKEND_IMAGE` and `FRONTEND_IMAGE` to the same
+SHA tag, authenticate/pull from GHCR, validate the Compose configuration, then
+run `docker compose pull` followed by `docker compose up -d --no-build`.
+Monitor container health and `/api/ops/health` before directing traffic.
+
+### Release and rollback
+
+1. Take and verify a PostgreSQL backup before the release; see
+   [PostgreSQL backup and recovery](#postgresql-backup-and-recovery).
+2. Record the currently deployed image SHA and database Alembic revision.
+3. Review the migration SQL. Prefer backward-compatible, expand/contract
+   migrations so the currently running image remains compatible during
+   rollout. The migration service runs automatically before the new backend.
+4. Deploy both frontend and backend images from the same commit, then check
+   readiness, worker/scheduler status, job queue, integration syncs, and
+   application logs.
+5. If the application release fails, pin both services back to their previous
+   SHA-tagged images and restart the stack. Do not automatically downgrade
+   Alembic: schema downgrades can remove newly written data and may not be
+   compatible with the previous version. Use a reviewed corrective
+   forward-migration where possible.
+6. If recovery requires restoring data, restore a verified backup into an
+   isolated database first, validate the application and records, and only
+   then plan a controlled cutover. Never restore over the live database as an
+   initial rollback step.
+
+Run a release migration explicitly when operating a deployment controller
+that does not use this Compose dependency graph:
+
+```powershell
+docker compose run --rm migrate
+```
+
+### Backup and restore scripts
+
+The scripts under `deploy/` require PostgreSQL client tools on the operator's
+machine and use `DATABASE_URL` / `BACKUP_DIR` for backups. The restore script
+requires `RESTORE_DATABASE_URL`, `BACKUP_FILE`, and the explicit
+`CONFIRM_RESTORE=RESTORE_TO_EMPTY_DATABASE` guard. Restore only to a newly
+created isolated, empty database; the script never drops a database or uses
+`pg_restore --clean`. Restrict access to dumps and checksum files and encrypt
+backup storage according to the organization's key-management policy.
+
+```powershell
+$env:BACKUP_DIR = "D:\protected-backups\hardwareai"
+.\deploy\backup-postgres.ps1
+
+$env:BACKUP_FILE = "D:\protected-backups\hardwareai\hardwareai-<timestamp>.dump"
+$env:RESTORE_DATABASE_URL = "postgresql+psycopg://user:password@recovery-host:5432/hardwareai_restore"
+$env:CONFIRM_RESTORE = "RESTORE_TO_EMPTY_DATABASE"
+.\deploy\restore-postgres.ps1
+```
+
+After restoring, verify the revision using the recovery database URL:
+
+```powershell
+$env:DATABASE_URL = $env:RESTORE_DATABASE_URL
+python -m alembic current
+```
+
+Run a documented application-data validation before considering the recovery
+successful.
+
+## 13H executive dashboard and UX
+
+The authenticated `/dashboard` page summarizes the latest saved analysis, its
+daily production trend, product/supplier defect rankings, open alert severity,
+recent analysis lineage, and improvement cases. KPI cards and trend details
+link to the saved analysis record; alert counts link to the Alert Center. The
+dashboard uses the same server-side authorization and Plant-scoped endpoints
+as the rest of the application, and labels production KPIs as belonging to
+the latest analysis rather than presenting them as plant-wide aggregates.
+Missing data is shown as an empty state, and failed sections retain their
+request ID where available.
+
+### Phase 13 readiness boundaries
+
+- **13E:** The only executable integration is user-uploaded CSV/XLSX. ERP,
+  MES, SCADA, PLC, and machine-system connectors, durable scheduled sync, and
+  automatic external-connection recovery remain pending selection of a real
+  vendor/protocol and its data contract. The file connector's sync history and
+  idempotency do not imply those external connector capabilities.
+- **13B:** Query/index and upload limits are implemented, but a representative
+  production load/stress baseline has not been measured. Keep Redis or another
+  broker out until measured PostgreSQL queue throughput or contention shows a
+  need; test with the expected deployment replica count and worker settings.
+- **13D:** Structured logs, health endpoints, PostgreSQL/job/integration/AI
+  metrics are available, but external error tracking and centralized metrics
+  alerting must be configured in the target operations platform.
+- **13F:** CI builds and publishes commit-tagged images; actual environment
+  provisioning, secret-manager integration, and automated rollout remain
+  deployment-platform responsibilities. Validate production migration
+  compatibility and run a restore drill before release.

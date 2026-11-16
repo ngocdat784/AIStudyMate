@@ -2024,6 +2024,7 @@ Chỉ trả về JSON đúng schema.
         audit.fail(error)
         raise
 
+    audit.set_usage_from_response(interaction)
     raw_response = interaction.output_text
     audit.set_raw_response(raw_response)
 
@@ -2114,6 +2115,7 @@ Trả lời trực tiếp bằng tiếng Việt, dễ hiểu và có căn cứ v
         audit.fail(error)
         raise
 
+    audit.set_usage_from_response(interaction)
     raw_response = getattr(interaction, "output_text", None)
     audit.set_raw_response(raw_response)
     if not raw_response or not raw_response.strip():

@@ -1061,6 +1061,7 @@ Chỉ trả về JSON đúng với schema.
         audit.fail(exc)
         raise
 
+    audit.set_usage_from_response(interaction)
     raw_response = interaction.output_text or ""
     audit.set_raw_response(raw_response)
 

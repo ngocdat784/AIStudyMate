@@ -7,7 +7,11 @@ from pydantic import ValidationError
 from fastapi.testclient import TestClient
 
 from app.main import app
-from auth_test_helpers import clear_admin_auth_override, override_admin_auth
+from auth_test_helpers import (
+    clear_admin_auth_override,
+    override_admin_auth,
+    store_test_merged_hardware_dataset,
+)
 from app.services.hardware_ai_service import (
     HardwareTrendAnalysis,
     _build_hardware_trend_evidence,
@@ -15,7 +19,6 @@ from app.services.hardware_ai_service import (
     analyze_hardware_trends_with_ai,
 )
 from app.services.hardware_trend_service import analyze_hardware_trends
-from app.services.multi_file_service import store_merged_hardware_dataset
 
 
 def _trend_report():
@@ -240,8 +243,7 @@ class HardwareTrendAIServiceTests(unittest.TestCase):
         self.assertIn("không trả về chuỗi đơn thuần", request["contents"])
         self.assertNotIn("bao_cao_phan_tich", _valid_ai_result())
         log_response.assert_called_once_with(
-            "Gemini hardware trend response: %s",
-            response.text,
+            "Gemini hardware trend response received"
         )
 
     def test_analysis_audits_gemini_api_error(self):
@@ -839,7 +841,7 @@ class HardwareTrendAIEndpointTests(unittest.TestCase):
         clear_admin_auth_override()
 
     def test_ai_unavailability_keeps_python_trend_statistics(self):
-        dataset_id = store_merged_hardware_dataset(
+        dataset_id = store_test_merged_hardware_dataset(
             pd.DataFrame(
                 {
                     "Date": ["2026-10-01"],
