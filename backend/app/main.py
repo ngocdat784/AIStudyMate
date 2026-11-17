@@ -13,11 +13,14 @@ from app.routes.hardware import (
     router as hardware_router,
 )
 from app.routes.history import router as history_router
+from app.routes.intelligence import router as intelligence_router
 from app.routes.improvements import router as improvements_router
 from app.routes.integrations import router as integrations_router
 from app.routes.monitoring import router as monitoring_router
 from app.routes.observability import router as observability_router
+from app.routes.quality import router as quality_router
 from app.routes.reports import router as reports_router
+from app.routes.root_cause import router as root_cause_router
 from app.config import settings, validate_security_settings
 from app.services.monitoring_scheduler import start_scheduler, stop_scheduler
 from app.services.hardware_analysis_jobs import (
@@ -68,6 +71,9 @@ app.add_middleware(
 app.include_router(production_router)
 app.include_router(hardware_router)
 app.include_router(history_router)
+app.include_router(intelligence_router)
+app.include_router(quality_router)
+app.include_router(root_cause_router)
 app.include_router(improvements_router)
 app.include_router(integrations_router)
 app.include_router(monitoring_router)

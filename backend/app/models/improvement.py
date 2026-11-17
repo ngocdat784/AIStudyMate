@@ -5,7 +5,6 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
-    Integer,
     JSON,
     String,
     Text,
@@ -23,6 +22,11 @@ class ImprovementCase(Base):
             "status IN ('detected', 'action_planned', 'implemented', "
             "'measured', 'evaluated', 'closed')",
             name="ck_improvement_cases_status",
+        ),
+        CheckConstraint(
+            "action_priority IS NULL OR action_priority IN "
+            "('high', 'medium', 'low')",
+            name="ck_improvement_cases_action_priority",
         ),
         Index(
             "ix_improvement_cases_plant_created_id",
@@ -64,6 +68,13 @@ class ImprovementCase(Base):
     baseline: Mapped[dict] = mapped_column(JSON, nullable=False)
     root_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
     action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    action_priority: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    action_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    expected_impact: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verification_plan: Mapped[str | None] = mapped_column(Text, nullable=True)
     implemented_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

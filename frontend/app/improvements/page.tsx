@@ -21,6 +21,10 @@ type ImprovementCase = {
   baseline: Record<string, Observation>;
   root_cause: string | null;
   action: string | null;
+  action_priority: "high" | "medium" | "low" | null;
+  action_due_at: string | null;
+  expected_impact: string | null;
+  verification_plan: string | null;
   implemented_at: string | null;
   after_measurement: Record<string, Observation> | null;
   kpi_changes: Record<
@@ -64,8 +68,8 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-function localDateTimeValue() {
-  const now = new Date();
+function localDateTimeValue(daysFromNow = 0) {
+  const now = new Date(Date.now() + daysFromNow * 24 * 60 * 60 * 1000);
   return new Date(now.getTime() - now.getTimezoneOffset() * 60000)
     .toISOString()
     .slice(0, 16);
@@ -85,6 +89,14 @@ export default function ImprovementsPage() {
   const [baselineSamples, setBaselineSamples] = useState("30");
   const [rootCause, setRootCause] = useState("");
   const [action, setAction] = useState("");
+  const [actionPriority, setActionPriority] = useState<
+    "high" | "medium" | "low"
+  >("medium");
+  const [actionDueAt, setActionDueAt] = useState(() =>
+    localDateTimeValue(14),
+  );
+  const [expectedImpact, setExpectedImpact] = useState("");
+  const [verificationPlan, setVerificationPlan] = useState("");
   const [ownerId, setOwnerId] = useState("");
   const [implementedAt, setImplementedAt] = useState(localDateTimeValue);
   const [afterValue, setAfterValue] = useState("");
@@ -115,6 +127,7 @@ export default function ImprovementsPage() {
     setPlants(plantData);
     setCases(caseData.items);
     setTotal(caseData.total);
+    setSelectedId((current) => current || caseData.items[0]?.id || "");
   }, [page]);
 
   useEffect(() => {
@@ -220,6 +233,10 @@ export default function ImprovementsPage() {
       {
         root_cause: rootCause,
         action,
+        action_priority: actionPriority,
+        action_due_at: new Date(actionDueAt).toISOString(),
+        expected_impact: expectedImpact,
+        verification_plan: verificationPlan,
         owner_user_id: ownerId ? Number(ownerId) : undefined,
       },
       "Đã lưu nguyên nhân, hành động và người phụ trách.",
@@ -420,8 +437,58 @@ export default function ImprovementsPage() {
                       onChange={(event) => setAction(event.target.value)}
                     />
                   </label>
+                  <div className="integration-form-row">
+                    <label>
+                      Mức ưu tiên
+                      <select
+                        value={actionPriority}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setActionPriority(
+                            value === "high" || value === "low"
+                              ? value
+                              : "medium",
+                          );
+                        }}
+                      >
+                        <option value="high">Cao</option>
+                        <option value="medium">Trung bình</option>
+                        <option value="low">Thấp</option>
+                      </select>
+                    </label>
+                    <label>
+                      Hạn hoàn thành
+                      <input
+                        required
+                        type="datetime-local"
+                        value={actionDueAt}
+                        onChange={(event) =>
+                          setActionDueAt(event.target.value)
+                        }
+                      />
+                    </label>
+                  </div>
                   <label>
-                    ID người phụ trách (để trống để chưa giao)
+                    Tác động dự kiến (định tính)
+                    <textarea
+                      value={expectedImpact}
+                      onChange={(event) =>
+                        setExpectedImpact(event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    Kế hoạch xác minh
+                    <textarea
+                      required
+                      value={verificationPlan}
+                      onChange={(event) =>
+                        setVerificationPlan(event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    ID người phụ trách (để trống để mặc định là bạn)
                     <input
                       min="1"
                       type="number"
@@ -439,6 +506,28 @@ export default function ImprovementsPage() {
                     </button>
                   </div>
                 </form>
+              )}
+              {selectedCase.action && (
+                <div className="improvement-action-meta">
+                  <strong>
+                    Ưu tiên: {selectedCase.action_priority ?? "Chưa đặt"}
+                  </strong>
+                  <span>
+                    Hạn:{" "}
+                    {selectedCase.action_due_at
+                      ? new Date(selectedCase.action_due_at).toLocaleString()
+                      : "Chưa đặt"}
+                  </span>
+                  {selectedCase.expected_impact && (
+                    <p>{selectedCase.expected_impact}</p>
+                  )}
+                  {selectedCase.verification_plan && (
+                    <p>
+                      <strong>Kế hoạch xác minh:</strong>{" "}
+                      {selectedCase.verification_plan}
+                    </p>
+                  )}
+                </div>
               )}
               {selectedCase.status === "action_planned" && (
                 <form onSubmit={submitMeasurement}>

@@ -109,6 +109,177 @@ The uploaded bytes and custom prompt are cleared when a job reaches a terminal
 state. The completed result remains available through the job status endpoint
 and is linked to the persisted analysis-history record.
 
+## Manufacturing Intelligence foundation (Phase 2.0)
+
+`POST /api/intelligence/analyze` accepts an authenticated administrator or
+operator multipart upload (`file`) in CSV/XLSX format. Optional form fields
+are `analysis_question`, `column_mapping` (a JSON source-to-canonical object),
+`source_timezone` (IANA timezone, default `UTC`), `downtime_unit` (`seconds`,
+`minutes`, or `hours`), `production_unit`, `include_ai`, and `plant_id`.
+When a Plant is supplied, the caller must have access to it. Analysis output
+is saved to the shared Analysis History with the source checksum, evidence,
+caller, and optional Plant scope.
+
+The canonical data contract requires non-negative Production and treats
+Defects, Downtime, timestamps, product/process identifiers, and other
+dimensions as optional. Naive timestamps are interpreted in the selected
+source timezone and stored in UTC; downtime is normalized to minutes. Empty,
+duplicate, invalid, and rejected rows are counted in Data Quality. Invalid
+required Production rows are excluded; invalid populated optional values are
+reported and excluded from that metric.
+
+The versioned `schema_version: "2.0"` response includes request classification,
+execution plan, data quality, KPI results, descriptive statistics,
+correlations, daily time series, anomaly and bottleneck screening results,
+evidence references, heuristic confidence, and analysis limitations. The
+legacy hardware analysis response also embeds this result as
+`unified_analysis`, preserving existing response fields. The shared engine
+reuses the existing CSV/XLSX parser, canonical aliases, Python KPI/statistical
+calculations, Gemini client, and AI audit context rather than creating a
+separate analytics database or a second queue.
+
+Gemini interpretation is optional. If no API key is configured, the request
+can still return Python-computed results; Gemini failures or rejected
+evidence-bound output do not discard those results. AI statements must cite
+evidence IDs produced by the engine and are rejected if they contain
+unreferenced IDs or numeric claims. Correlation is association, not causation;
+root causes remain hypotheses; downtime/production bottleneck results are
+screening signals, not capacity proof; confidence is a documented heuristic,
+not a probability. The current connector remains user-triggered CSV/XLSX
+ingestion; direct ERP/MES/SCADA/PLC protocols and causal analysis are not
+claimed as implemented.
+
+## Production Intelligence (Phase 2.1)
+
+`POST /api/production/analyze` accepts an authenticated administrator/operator
+CSV or XLSX upload. Optional form fields are `source_timezone` (IANA timezone,
+default `UTC`), `production_unit`, `cycle_time_unit`, `duration_unit`,
+`downtime_unit`, and `include_ai`. The `/production` page provides the upload
+controls, plan/actual and period views, line/shift/process breakdowns,
+anomaly and bottleneck screening, evidence-linked interpretation, and a
+printable report. Results are saved to the shared Analysis History.
+
+The shared manufacturing data foundation recognizes explicit plan, actual
+production, production start/end, cycle and standard-cycle time, available,
+operating and waiting time, plus product, process, line, machine, shift, and
+date fields. Naive timestamps are interpreted in the selected timezone and
+normalized to UTC; cycle time is normalized to seconds and duration fields to
+minutes. Daily, weekly, and monthly trend buckets use the selected source
+timezone, although timestamps remain stored in UTC. The source rows must
+represent additive production quantities: do not
+repeat the same final output on every process row unless each row is a distinct
+process output that should be summed.
+
+Production achievement and plan variance use only rows with an explicit plan.
+Production rate divides actual output by available hours; throughput divides
+output associated with operating-time rows by operating hours. Start/end
+elapsed time may be used only as a clearly labeled fallback, not as confirmed
+machine operating time. Cycle time uses the production-weighted explicit
+cycle-time values, or operating time divided by output when explicit cycle
+time is absent. Takt time requires paired plan and available-time data. Line
+efficiency requires standard cycle time and available time; utilization
+requires paired operating and available time. Unsupported or incomplete
+denominators remain `null`, rather than treating raw output as efficiency.
+
+Repeated duration values are counted once within an identifiable
+line/machine/shift/date or timestamp-interval bucket; rows without line or
+machine identity are retained per row. Supply line or machine, shift, and date
+or start/end fields to disambiguate schedules. Separate non-overlapping
+durations that share the same bucket need distinct intervals. Production
+quantities and plans are still summed per valid row.
+
+Plan shortfalls are compared directly with explicit plan values. Daily
+production, production achievement, and per-process cycle time are screened
+against the prior eight periods using a 1.5-IQR boundary. Severity labels are
+heuristics (high at a 20% or greater relative change, medium at 10% or
+greater, otherwise low), not risk probabilities. Bottleneck candidates are
+screening signals based on process throughput and explicit waiting time;
+without process sequence and capacity data, line impact and causal root
+cause are not estimated. Gemini interpretation is optional and evidence
+validated; Python calculations remain available when AI is unconfigured or
+its output fails validation.
+
+## Quality Intelligence (Phase 2.2)
+
+`POST /api/quality/analyze` accepts an authenticated administrator/operator
+CSV or XLSX upload. Optional form fields are `column_mapping` (JSON
+source-to-canonical mapping), `source_timezone`, `downtime_unit`,
+`production_unit`, `measurement_unit`, and `include_ai`. Quality-only files do
+not need a Production column. Results are saved to the shared Analysis History;
+the `/quality` page presents KPI, Pareto, trend, SPC, evidence, and AI report
+views.
+
+The shared manufacturing data contract recognizes inspected quantity,
+defective units, defect counts and types, first-pass inspected/passed counts,
+rework and scrap quantities, product/process/line/shift, process sequence,
+measurement characteristic/value, subgroup, and lower/upper specification
+limits. Numeric sample measurements and specification limits may be negative;
+count and quantity fields must remain non-negative. Invalid optional values
+are reported in Data Quality and excluded from calculations.
+
+Total inspected and defect totals use explicitly populated fields. Defect rate
+uses `Defective Units / Inspected` only with complete unit-count coverage; if
+those counts are absent, it uses explicit defect-event counts or one event per
+classified row. Incomplete or mixed defective-unit coverage is reported as
+unavailable rather than combining incompatible numerator types. FPY uses
+explicit first-pass passed/inspected counts, and uses the final process
+sequence only when process sequence is complete. RTY requires complete
+first-pass data, at least two ordered stages, and a consistent route across
+products. Rework and scrap rates require complete explicit numerators and
+inspected denominators. Unsupported denominators remain `null`.
+
+Defect Pareto and product/process/line/shift breakdowns are based on defect
+events and available dimensions. Trend and anomaly screening uses the prior
+eight valid periods and a 1.5-IQR boundary. P charts require defective-unit
+counts; C charts require a constant inspected sample size; U charts support
+varying inspected sizes. X-bar/R charts require explicit subgroup IDs or batch
+IDs, equal subgroup sizes from 2–10, and at least 20 subgroups for a stable
+classification. Limits use three-sigma rules; Western Electric/Nelson run
+rules are not implemented. Cp/Cpk are emitted only for a stable X-bar/R
+process with at least 30 measurements, one consistent specification window,
+and a Jarque–Bera normality screen of p >= 0.05. These assumptions are
+screening safeguards, not proof of process capability.
+
+Gemini interpretation is optional and evidence validated; Python calculations
+remain available if AI is not configured or its output fails validation.
+Recommendations and root-cause statements are hypotheses, not causal proof.
+Direct ERP/MES/SCADA/PLC ingestion, gauge-system validation, and advanced SPC
+run rules are not claimed as implemented.
+
+## Root Cause Intelligence (Phase 2.3)
+
+`POST /api/root-cause/analyze` accepts either one combined CSV/XLSX file or
+separate production and quality files. Split files must share the selected
+time key and grouping dimensions (product, process, line, shift, machine, or
+material) to be linked. Each file can provide its own source-to-canonical
+column mapping. The optional `plant_id` is checked against the caller's
+plant access and the result, evidence, and source checksum are saved to
+Analysis History. The `/root-cause` page exposes correlation, 6M evidence,
+ranked hypotheses, a five-whys worksheet, and proposed corrective actions.
+
+The engine aggregates normalized records by day, week, or month plus the
+selected dimensions. It reports pairwise-complete Pearson and Spearman
+correlations and the number of paired observations for each cell. Notable
+associations use an absolute coefficient threshold of 0.3 and at least five
+paired groups; this is a screening threshold, not a significance test.
+Hypothesis support scores are transparent heuristics derived from correlation
+magnitude or stratified defect-rate lift, not probabilities, causal effect
+estimates, or confidence intervals. The analysis does not infer a cause when
+the selected outcome or its denominator is unavailable.
+
+Fishbone evidence is grouped into Man, Machine, Method, Material, Measurement,
+and Environment. Missing inputs are listed instead of being filled with
+assumptions. The five-whys section is an investigation worksheet unless a
+validated Gemini report is available. AI statements must reference existing
+evidence IDs and are rejected when they include unlinked numeric claims;
+Python calculations and ranked results are retained on AI errors. AI-generated
+causes remain hypotheses. To create a corrective-action case, select a plant
+and action; its owner, priority, due date, qualitative expected impact, and
+verification plan are stored in the continuous-improvement tracker. A due date
+is a proposed target and must be confirmed by the responsible manager.
+Migration `9f3c7a2d6e10` adds the action-planning fields to
+`improvement_cases`.
+
 ## Industrial file integrations
 
 The integration registry currently advertises only the implemented CSV/XLSX

@@ -25,6 +25,9 @@ from app.services.hardware_ai_service import (
     analyze_hardware_deep,
     normalize_summary_record_scope,
 )
+from app.services.intelligence_orchestrator import (
+    orchestrate_manufacturing_analysis,
+)
 
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
@@ -2145,6 +2148,7 @@ def analyze_hardware_dataframe(
     anomalies = detect_hardware_anomalies(kpis)
 
     ai_unavailable = False
+    ai_not_configured = False
     insights_available = True
 
     try:
@@ -2154,7 +2158,12 @@ def analyze_hardware_dataframe(
         )
         result = analysis.model_dump()
     except Exception as exc:
-        if not is_temporary_ai_error(exc):
+        ai_not_configured = (
+            isinstance(exc, ValueError)
+            and "GEMINI_API_KEY" in str(exc)
+            and not settings.GEMINI_API_KEY
+        )
+        if not is_temporary_ai_error(exc) and not ai_not_configured:
             raise
         logger.warning(
             "Hardware Insights AI request failed; using Python fallback: %s",
@@ -2195,7 +2204,12 @@ def analyze_hardware_dataframe(
             anomalies=anomalies,
         )
     except Exception as exc:
-        if not is_temporary_ai_error(exc):
+        ai_not_configured = ai_not_configured or (
+            isinstance(exc, ValueError)
+            and "GEMINI_API_KEY" in str(exc)
+            and not settings.GEMINI_API_KEY
+        )
+        if not is_temporary_ai_error(exc) and not ai_not_configured:
             raise
         logger.warning(
             "Hardware deep analysis AI request failed; using fallback: %s",
@@ -2208,12 +2222,25 @@ def analyze_hardware_dataframe(
 
     if ai_unavailable:
         result["ai_status"] = (
-            "partially_unavailable"
+            "not_configured"
+            if ai_not_configured
+            else "partially_unavailable"
             if insights_available or deep_available
             else "temporarily_unavailable"
         )
-        result["ai_error"] = AI_UNAVAILABLE_MESSAGE
+        result["ai_error"] = (
+            "Gemini chưa được cấu hình; kết quả tính toán Python vẫn khả dụng."
+            if ai_not_configured
+            else AI_UNAVAILABLE_MESSAGE
+        )
     else:
         result["ai_status"] = "available"
+
+    unified_analysis = orchestrate_manufacturing_analysis(
+        dataframe,
+        include_ai=False,
+    )
+    result["unified_analysis"] = unified_analysis
+    result["evidence"] = unified_analysis["evidence_references"]
 
     return result

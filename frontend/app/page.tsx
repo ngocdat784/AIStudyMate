@@ -195,6 +195,41 @@ type AIAnalysis = {
   recommended_actions: RecommendedAction[];
 };
 
+type UnifiedAnalysisResult = {
+  schema_version: "2.0";
+  ai_status:
+    | "not_requested"
+    | "not_configured"
+    | "available"
+    | "error"
+    | "validation_failed"
+    | "insufficient_evidence";
+  executive_summary: string;
+  data_quality: {
+    quality_score: number;
+    quality_status: string;
+    rows_used_for_analysis: number;
+  };
+  kpi_results: Record<
+    string,
+    {
+      value: number | null;
+      unit: string;
+      record_count: number;
+      evidence_id: string | null;
+    }
+  >;
+  detected_anomalies: Array<{
+    metric: string;
+    period: string;
+    observed: number;
+    unit: string;
+    evidence_ids: string[];
+  }>;
+  evidence_references: Array<{ id: string; metric: string }>;
+  analysis_limitations: string[];
+};
+
 type HardwareResult = {
   title: string;
   summary: string;
@@ -221,6 +256,7 @@ type HardwareResult = {
   data_processing: DataProcessing;
   anomaly_analysis: AnomalyAnalysis;
   ai_analysis: AIAnalysis;
+  unified_analysis?: UnifiedAnalysisResult;
   custom_prompt_response?: string;
   custom_prompt_error?: string;
   analysis_history_id?: number | null;
@@ -2744,6 +2780,68 @@ export default function Home() {
               </div>
 
             </div>
+
+            {result.unified_analysis && (
+              <section className="dashboard-card" id="unified-analysis">
+                <div className="dashboard-card-header">
+                  <div>
+                    <span>01</span>
+                    <h3>Manufacturing Analytics Engine</h3>
+                  </div>
+                  <p>
+                    Schema {result.unified_analysis.schema_version} · AI{" "}
+                    {result.unified_analysis.ai_status}
+                  </p>
+                </div>
+
+                <p>{result.unified_analysis.executive_summary}</p>
+                <p>
+                  Data quality:{" "}
+                  {result.unified_analysis.data_quality.quality_score}%
+                  {" · "}
+                  {result.unified_analysis.data_quality.rows_used_for_analysis.toLocaleString(
+                    "vi-VN"
+                  )}{" "}
+                  dòng được phân tích ·{" "}
+                  {result.unified_analysis.evidence_references.length} evidence
+                </p>
+
+                <div className="kpi-grid">
+                  {Object.entries(
+                    result.unified_analysis.kpi_results
+                  ).map(([name, metric]) => (
+                    <div className="kpi-card" key={name}>
+                      <div className="kpi-label">{name}</div>
+                      <div className="kpi-value">
+                        {metric.value === null
+                          ? "—"
+                          : metric.value.toLocaleString("vi-VN")}
+                      </div>
+                      <span className="kpi-unit">{metric.unit}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {result.unified_analysis.detected_anomalies.length > 0 && (
+                  <div>
+                    <h4>Outlier cần xác minh</h4>
+                    <ul>
+                      {result.unified_analysis.detected_anomalies.map(
+                        (anomaly) => (
+                          <li
+                            key={`${anomaly.metric}-${anomaly.period}`}
+                          >
+                            {anomaly.metric} · {anomaly.period}:{" "}
+                            {anomaly.observed.toLocaleString("vi-VN")}{" "}
+                            {anomaly.unit} ({anomaly.evidence_ids.join(", ")})
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  </div>
+                )}
+              </section>
+            )}
 
             <section className="export-report-card">
               <div className="export-report-info">

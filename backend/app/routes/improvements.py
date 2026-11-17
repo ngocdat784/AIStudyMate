@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -49,6 +49,12 @@ class ImprovementCaseCreate(BaseModel):
     problem: str = Field(min_length=1, max_length=4000)
     baseline: dict[str, KPIObservation] = Field(min_length=1, max_length=50)
     owner_user_id: int | None = Field(default=None, gt=0)
+    root_cause: str | None = Field(default=None, max_length=4000)
+    action: str | None = Field(default=None, max_length=4000)
+    action_priority: Literal["high", "medium", "low"] | None = None
+    action_due_at: datetime | None = None
+    expected_impact: str | None = Field(default=None, max_length=4000)
+    verification_plan: str | None = Field(default=None, max_length=4000)
 
     @field_validator("problem")
     @classmethod
@@ -58,12 +64,29 @@ class ImprovementCaseCreate(BaseModel):
             raise ValueError("Mô tả vấn đề không được để trống.")
         return normalized
 
+    @field_validator(
+        "root_cause",
+        "action",
+        "expected_impact",
+        "verification_plan",
+    )
+    @classmethod
+    def normalize_create_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
 
 class ImprovementCaseUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     root_cause: str | None = Field(default=None, max_length=4000)
     action: str | None = Field(default=None, max_length=4000)
+    action_priority: Literal["high", "medium", "low"] | None = None
+    action_due_at: datetime | None = None
+    expected_impact: str | None = Field(default=None, max_length=4000)
+    verification_plan: str | None = Field(default=None, max_length=4000)
     owner_user_id: int | None = Field(default=None, gt=0)
     implemented_at: datetime | None = None
     after_measurement: dict[str, KPIObservation] | None = Field(
@@ -75,7 +98,13 @@ class ImprovementCaseUpdate(BaseModel):
     conclusion: str | None = Field(default=None, max_length=4000)
     close: bool | None = None
 
-    @field_validator("root_cause", "action", "conclusion")
+    @field_validator(
+        "root_cause",
+        "action",
+        "expected_impact",
+        "verification_plan",
+        "conclusion",
+    )
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -173,6 +202,12 @@ def _case_json(case: ImprovementCase) -> dict[str, Any]:
         "baseline": case.baseline,
         "root_cause": case.root_cause,
         "action": case.action,
+        "action_priority": case.action_priority,
+        "action_due_at": (
+            case.action_due_at.isoformat() if case.action_due_at else None
+        ),
+        "expected_impact": case.expected_impact,
+        "verification_plan": case.verification_plan,
         "implemented_at": (
             case.implemented_at.isoformat() if case.implemented_at else None
         ),
@@ -306,8 +341,20 @@ def create_improvement_case(
             name: observation.model_dump()
             for name, observation in payload.baseline.items()
         },
+        root_cause=payload.root_cause,
+        action=payload.action,
+        action_priority=payload.action_priority,
+        action_due_at=(
+            payload.action_due_at.replace(tzinfo=timezone.utc)
+            if payload.action_due_at is not None
+            and payload.action_due_at.tzinfo is None
+            else payload.action_due_at
+        ),
+        expected_impact=payload.expected_impact,
+        verification_plan=payload.verification_plan,
         status="detected",
     )
+    case.status = _case_status(case)
     db.add(case)
     db.flush()
     record_user_action(
@@ -360,6 +407,11 @@ def update_improvement_case(
             )
         if updates["implemented_at"].tzinfo is None:
             updates["implemented_at"] = updates["implemented_at"].replace(
+                tzinfo=timezone.utc
+            )
+    if "action_due_at" in updates and updates["action_due_at"] is not None:
+        if updates["action_due_at"].tzinfo is None:
+            updates["action_due_at"] = updates["action_due_at"].replace(
                 tzinfo=timezone.utc
             )
     if updates.get("after_measurement") is not None:

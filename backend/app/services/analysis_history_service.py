@@ -21,6 +21,7 @@ def create_analysis_history(
     summary: str | None = None,
     source_filename: str | None = None,
     dataset_id: str | None = None,
+    plant_id: int | None = None,
 ) -> AnalysisHistory:
     """Save one analysis result to the database."""
     history = AnalysisHistory(
@@ -31,6 +32,7 @@ def create_analysis_history(
         dataset_id=dataset_id,
         result_data=result_data,
         creator_user_id=creator_user_id,
+        plant_id=plant_id,
         source_file_sha256=source_file_sha256,
         dataset_version=dataset_version,
         algorithm_version=algorithm_version,

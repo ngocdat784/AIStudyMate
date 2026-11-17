@@ -176,6 +176,49 @@ class ContinuousImprovementTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
 
+    def test_case_persists_priority_deadline_impact_and_verification_plan(self):
+        response = self.client.post(
+            "/api/improvements",
+            json={
+                "plant_id": self.plant_id,
+                "problem": "Defect rate increased on the sealing step.",
+                "baseline": {
+                    "defect_rate": {
+                        "value": 8.5,
+                        "sample_count": 120,
+                    }
+                },
+                "root_cause": "Material lot variation is a hypothesis.",
+                "action": "Inspect the implicated material lots.",
+                "action_priority": "high",
+                "action_due_at": "2026-11-23T09:00:00+00:00",
+                "expected_impact": "May reduce defects if the hypothesis is confirmed.",
+                "verification_plan": "Compare matched lots using the same inspection plan.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        case = response.json()
+        self.assertEqual(case["status"], "action_planned")
+        self.assertEqual(case["action_priority"], "high")
+        self.assertEqual(case["action_due_at"], "2026-11-23T09:00:00")
+        self.assertIn("hypothesis", case["root_cause"])
+        self.assertIn("May reduce defects", case["expected_impact"])
+        self.assertIn("matched lots", case["verification_plan"])
+
+    def test_case_rejects_unknown_action_priority(self):
+        response = self.client.post(
+            "/api/improvements",
+            json={
+                "plant_id": self.plant_id,
+                "problem": "An invalid priority must be rejected.",
+                "baseline": {"defect_rate": {"value": 1.0, "sample_count": 10}},
+                "action_priority": "urgent",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
     def test_list_is_paginated_and_reports_observed_case_count(self):
         created = self._create_case()
         self.assertEqual(created.status_code, 201, created.text)

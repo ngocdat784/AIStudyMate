@@ -556,6 +556,7 @@ def _save_hardware_history_safely(
     source_filename: str | None = None,
     dataset_id: str | None = None,
     source_file_sha256: str | None = None,
+    plant_id: int | None = None,
 ) -> int | None:
     """Save analysis history without breaking a successful analysis response."""
     try:
@@ -573,6 +574,7 @@ def _save_hardware_history_safely(
             summary=summary,
             source_filename=source_filename,
             dataset_id=dataset_id,
+            plant_id=plant_id,
             source_file_sha256=source_file_sha256,
             algorithm_version="hardware-analysis-v1",
             ai_status=encoded_result.get("ai_status"),

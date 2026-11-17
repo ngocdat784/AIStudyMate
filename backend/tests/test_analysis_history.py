@@ -569,6 +569,139 @@ class AnalysisHistoryAPITests(unittest.TestCase):
             )
         )
 
+    def test_manufacturing_intelligence_api_returns_and_saves_unified_result(self):
+        response = self.client.post(
+            "/api/intelligence/analyze",
+            data={
+                "analysis_question": "Phân tích KPI",
+                "include_ai": "false",
+                "source_timezone": "UTC",
+            },
+            files={
+                "file": (
+                    "production.csv",
+                    (
+                        "Date,Production,Defects,Downtime\n"
+                        "2026-10-01,100,2,5\n"
+                        "2026-10-02,120,3,7\n"
+                    ).encode(),
+                    "text/csv",
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        payload = response.json()
+        self.assertEqual(payload["schema_version"], "2.0")
+        self.assertEqual(payload["ai_status"], "not_requested")
+        self.assertEqual(payload["kpi_results"]["production"]["value"], 220)
+        self.assertTrue(payload["evidence_references"])
+        self.assertIn("analysis_history_id", payload)
+        with Session(self.engine) as session:
+            history = session.get(AnalysisHistory, payload["analysis_history_id"])
+            self.assertIsNotNone(history)
+            assert history is not None
+            self.assertEqual(
+                history.analysis_type,
+                "manufacturing_intelligence",
+            )
+            self.assertEqual(history.result_data["schema_version"], "2.0")
+            self.assertEqual(
+                history.source_filename,
+                "production.csv",
+            )
+
+    def test_production_intelligence_api_returns_plan_actual_and_evidence(self):
+        response = self.client.post(
+            "/api/production/analyze",
+            data={
+                "include_ai": "false",
+                "source_timezone": "UTC",
+            },
+            files={
+                "file": (
+                    "production.csv",
+                    (
+                        "Date,Line,Shift,Process,Production,Planned Production,"
+                        "Available Time,Operating Time\n"
+                        "2026-10-01,Line A,Day,Cut,90,100,480,450\n"
+                        "2026-10-01,Line B,Night,Pack,100,100,480,400\n"
+                    ).encode(),
+                    "text/csv",
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        intelligence = payload["production_intelligence"]
+        self.assertEqual(intelligence["schema_version"], "2.1")
+        self.assertEqual(
+            intelligence["kpi_results"]["production_achievement_rate"]["value"],
+            95,
+        )
+        self.assertEqual(intelligence["plan_vs_actual"]["variance"]["value"], -10)
+        self.assertTrue(payload["evidence"])
+        self.assertEqual(payload["ai_status"], "not_requested")
+        with Session(self.engine) as session:
+            history = session.scalar(select(AnalysisHistory))
+            self.assertIsNotNone(history)
+            assert history is not None
+            self.assertEqual(
+                history.analysis_type,
+                "production_analysis",
+            )
+            self.assertEqual(
+                history.algorithm_version,
+                "production-intelligence-v2.1",
+            )
+
+    def test_quality_intelligence_api_saves_quality_only_file_to_history(self):
+        response = self.client.post(
+            "/api/quality/analyze",
+            data={
+                "include_ai": "false",
+                "source_timezone": "UTC",
+            },
+            files={
+                "file": (
+                    "quality.csv",
+                    (
+                        "Date,Product,Line,Shift,Process,Process Sequence,Batch,"
+                        "Inspected,Defective Units,Defects,First Pass Inspected,"
+                        "First Pass Passed,Reworked Units,Scrapped Units,Defect Type\n"
+                        "2026-11-01,Widget,Line A,Day,Cut,1,B-1,100,8,10,100,90,5,3,Scratch\n"
+                        "2026-11-01,Widget,Line A,Day,Pack,2,B-1,90,4,5,90,81,2,1,Crack\n"
+                    ).encode(),
+                    "text/csv",
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        payload = response.json()
+        self.assertEqual(payload["schema_version"], "2.2")
+        self.assertEqual(payload["ai_status"], "not_requested")
+        self.assertEqual(
+            payload["kpi_results"]["total_inspected"]["value"],
+            190,
+        )
+        self.assertEqual(payload["kpi_results"]["rty"]["value"], 81)
+        self.assertTrue(payload["evidence_references"])
+        with Session(self.engine) as session:
+            history = session.get(
+                AnalysisHistory,
+                payload["analysis_history_id"],
+            )
+            self.assertIsNotNone(history)
+            assert history is not None
+            self.assertEqual(history.analysis_type, "quality_analysis")
+            self.assertEqual(
+                history.algorithm_version,
+                "quality-intelligence-v2.2",
+            )
+            self.assertEqual(history.source_filename, "quality.csv")
+
 
 if __name__ == "__main__":
     unittest.main()

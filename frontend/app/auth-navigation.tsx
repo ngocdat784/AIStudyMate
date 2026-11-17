@@ -86,6 +86,15 @@ export default function AuthNavigation() {
         <Link href="/dashboard" onClick={handleProtectedNavigation}>
           Tổng quan
         </Link>
+        <Link href="/production" onClick={handleProtectedNavigation}>
+          Phân tích sản xuất
+        </Link>
+        <Link href="/quality" onClick={handleProtectedNavigation}>
+          Phân tích chất lượng
+        </Link>
+        <Link href="/root-cause" onClick={handleProtectedNavigation}>
+          Điều tra nguyên nhân
+        </Link>
         <Link href="/monitoring" onClick={handleProtectedNavigation}>
           Giám sát
         </Link>

@@ -27,10 +27,24 @@ CANONICAL_FIELDS = (
     "Process",
     "Order",
     "Material",
+    "Line",
+    "Shift",
+    "Defect",
 )
 REQUIRED_FIELDS = ("Date", "Production")
 NUMERIC_FIELDS = {"Production", "Defects", "Downtime"}
-CODE_FIELDS = {"Product", "Model", "Component", "Supplier", "Batch", "Machine"}
+CODE_FIELDS = {
+    "Product",
+    "Model",
+    "Component",
+    "Supplier",
+    "Batch",
+    "Machine",
+    "Line",
+    "Process",
+    "Material",
+    "Order",
+}
 _ATTRIBUTE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,62}$")
 _DOWNTIME_TO_MINUTES = {
     "minutes": 1.0,
@@ -95,6 +109,13 @@ def validate_connector_mapping(
         raise ValueError(
             "Đơn vị Downtime phải là minutes, seconds hoặc hours."
         )
+    production_unit = normalization.get("production_unit", "unit")
+    if (
+        not isinstance(production_unit, str)
+        or not production_unit.strip()
+        or len(production_unit.strip()) > 40
+    ):
+        raise ValueError("Đơn vị Production không hợp lệ.")
 
     uppercase_fields = normalization.get("uppercase_code_fields", [])
     if (
@@ -106,12 +127,15 @@ def validate_connector_mapping(
     return {
         "date_timezone": date_timezone,
         "downtime_unit": downtime_unit,
+        "production_unit": production_unit.strip().casefold(),
         "uppercase_code_fields": uppercase_fields,
     }
 
 
 def suggest_column_mapping(columns: list[str]) -> dict[str, str]:
     aliases = {
+        "timestamp": "Date",
+        "production_timestamp": "Date",
         "date": "Date",
         "production_date": "Date",
         "work_date": "Date",
@@ -150,6 +174,17 @@ def suggest_column_mapping(columns: list[str]) -> dict[str, str]:
         "order_id": "Order",
         "material": "Material",
         "material_code": "Material",
+        "line": "Line",
+        "line_id": "Line",
+        "line_name": "Line",
+        "work_center": "Line",
+        "shift": "Shift",
+        "shift_id": "Shift",
+        "ca": "Shift",
+        "machine_id": "Machine",
+        "machine_name": "Machine",
+        "defect": "Defect",
+        "defect_description": "Defect",
     }
     mapping: dict[str, str] = {}
     used_targets: set[str] = set()
@@ -331,6 +366,7 @@ def map_and_validate_dataframe(
             "stored_timezone": "UTC",
             "downtime_source_unit": config["downtime_unit"],
             "downtime_target_unit": "minutes",
+            "production_unit": config["production_unit"],
             "uppercase_code_fields": sorted(uppercase_fields),
         },
     }
