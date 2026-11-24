@@ -1141,16 +1141,17 @@ def analyze_material_intelligence(
             else None
         )
 
-    highest_loss = next(
-        (
-            item for item in sorted(
-                material_performance,
-                key=lambda row: -(row["material_loss"] or 0),
-            )
-            if item["material_loss"] is not None
-        ),
-        None,
-    )
+    highest_losses_by_unit: dict[str, dict[str, Any]] = {}
+    for item in material_performance:
+        if item["material_loss"] is None:
+            continue
+        unit = item["unit"]
+        if unit is None:
+            continue
+        current = highest_losses_by_unit.get(unit)
+        if current is None or item["material_loss"] > current["material_loss"]:
+            highest_losses_by_unit[unit] = item
+
     highest_lot = defect_associated_lots[0] if defect_associated_lots else None
     high_risk_supplier = next(
         (
@@ -1179,19 +1180,49 @@ def analyze_material_intelligence(
         key=lambda item: item["waste_rate_percent"] or 0,
         default=None,
     )
+    def _format_loss(value: float) -> str:
+        return f"{value:g}"
+
     management_answers: dict[str, dict[str, Any]] = {
         "highest_material_loss": (
             {
                 "answer": (
-                    f"{highest_loss['material']} có hao hụt ghi nhận "
-                    f"{highest_loss['material_loss']} {highest_loss['unit'] or ''}."
+                    "Trong dữ liệu chỉ có một đơn vị dùng chung: "
+                    f"{next(iter(highest_losses_by_unit.values()))['material']} "
+                    "có hao hụt cao nhất trong cùng đơn vị "
+                    f"{next(iter(highest_losses_by_unit.values()))['unit']}, "
+                    "với mức ghi nhận "
+                    f"{_format_loss(next(iter(highest_losses_by_unit.values()))['material_loss'])} "
+                    f"{next(iter(highest_losses_by_unit.values()))['unit']}."
                 ),
                 "evidence_ids": [
-                    highest_loss["evidence_ids"]["material_loss"]
+                    next(iter(highest_losses_by_unit.values()))["evidence_ids"]["material_loss"]
                 ],
             }
-            if highest_loss
-            else {"answer": "Chưa đủ dữ liệu hao hụt vật liệu.", "evidence_ids": []}
+            if len(highest_losses_by_unit) == 1
+            else (
+                {
+                    "answer": (
+                        "Không có cơ sở quy đổi để xếp hạng vật liệu trên toàn bộ "
+                        "đơn vị. Hao hụt cao nhất theo từng đơn vị: "
+                        + "; ".join(
+                            (
+                                f"{item['material']} ghi nhận "
+                                f"{_format_loss(item['material_loss'])} {unit}"
+                            )
+                            for unit, item in sorted(highest_losses_by_unit.items())
+                        )
+                        + "."
+                    ),
+                    "evidence_ids": [
+                        item["evidence_ids"]["material_loss"]
+                        for item in highest_losses_by_unit.values()
+                        if item["evidence_ids"].get("material_loss")
+                    ],
+                }
+                if len(highest_losses_by_unit) > 1
+                else {"answer": "Chưa đủ dữ liệu hao hụt vật liệu.", "evidence_ids": []}
+            )
         ),
         "defective_lots": (
             {

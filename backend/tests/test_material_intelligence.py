@@ -188,3 +188,80 @@ def test_material_totals_do_not_mix_units_or_currencies():
     assert result["kpi_results"]["material_loss"]["value"] is None
     assert result["kpi_results"]["material_cost"]["value"] is None
     assert len(result["material_performance"]) == 2
+
+
+def test_highest_material_loss_is_ranked_within_each_unit_only():
+    result = analyze_material_intelligence(
+        pd.DataFrame(
+            [
+                {
+                    "Material": "Steel",
+                    "Material Unit": "g",
+                    "Actual Consumption": 100000,
+                    "Material Loss": 44000,
+                },
+                {
+                    "Material": "Plastic",
+                    "Material Unit": "g",
+                    "Actual Consumption": 50000,
+                    "Material Loss": 23000,
+                },
+                {
+                    "Material": "Electronic Component",
+                    "Material Unit": "piece",
+                    "Actual Consumption": 1000,
+                    "Material Loss": 210,
+                },
+            ]
+        )
+    )
+
+    answer = result["management_answers"]["highest_material_loss"]
+    assert "Không có cơ sở quy đổi" in answer["answer"]
+    assert "Steel ghi nhận 44000 g" in answer["answer"]
+    assert "Electronic Component ghi nhận 210 piece" in answer["answer"]
+    assert "Steel có hao hụt cao nhất trên toàn bộ" not in answer["answer"]
+
+    evidence_ids = set(answer["evidence_ids"])
+    assert evidence_ids
+    assert evidence_ids.issubset(
+        {item["id"] for item in result["evidence_references"]}
+    )
+
+    steel = next(
+        item
+        for item in result["material_performance"]
+        if item["material"] == "Steel"
+    )
+    electronic = next(
+        item
+        for item in result["material_performance"]
+        if item["material"] == "Electronic Component"
+    )
+    assert steel["evidence_ids"]["material_loss"] in evidence_ids
+    assert electronic["evidence_ids"]["material_loss"] in evidence_ids
+
+
+def test_highest_material_loss_uses_single_unit_as_direct_comparison():
+    result = analyze_material_intelligence(
+        pd.DataFrame(
+            [
+                {
+                    "Material": "Steel",
+                    "Material Unit": "g",
+                    "Actual Consumption": 100000,
+                    "Material Loss": 44000,
+                },
+                {
+                    "Material": "Plastic",
+                    "Material Unit": "g",
+                    "Actual Consumption": 50000,
+                    "Material Loss": 23000,
+                },
+            ]
+        )
+    )
+
+    answer = result["management_answers"]["highest_material_loss"]
+    assert "cùng đơn vị g" in answer["answer"]
+    assert "Steel" in answer["answer"]
