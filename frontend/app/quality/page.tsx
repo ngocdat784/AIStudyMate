@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 
+import FileDropzone from "../../components/file-dropzone";
 import { apiFetch } from "../../lib/api";
 
 type Metric = {
@@ -411,18 +412,16 @@ export default function QualityIntelligencePage() {
         </header>
 
         <form className="executive-card quality-upload" onSubmit={submitAnalysis}>
-          <label>
-            File chất lượng (CSV/XLSX)
-            <input
-              type="file"
-              accept=".csv,.xlsx"
-              onChange={(event) => {
-                setFile(event.target.files?.[0] ?? null);
-                setResult(null);
-                setError("");
-              }}
-            />
-          </label>
+          <FileDropzone
+            accept=".csv,.xlsx"
+            title="File chất lượng"
+            files={file ? [file] : []}
+            onFilesSelected={(selected) => {
+              setFile(selected[0] ?? null);
+              setResult(null);
+              setError("");
+            }}
+          />
           <div className="quality-form-grid">
             <label>
               Source timezone (IANA)

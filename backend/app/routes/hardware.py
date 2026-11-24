@@ -930,18 +930,34 @@ def process_hardware_analysis_job(job_id: str) -> None:
 )
 async def compare_hardware(
     file: UploadFile = File(...),
-    model_a: str = Form(...),
-    model_b: str = Form(...),
+    model_a: str | None = Form(default=None),
+    model_b: str | None = Form(default=None),
+    model_names: list[str] | None = Form(default=None),
     db: Session = Depends(get_db),
     user: AlertUser = Depends(get_current_user),
 ):
     try:
+        if model_names is not None:
+            if model_a is not None or model_b is not None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Gửi danh sách model_names hoặc cặp model_a/model_b, không gửi đồng thời.",
+                )
+            selected_models = model_names
+        elif model_a is not None and model_b is not None:
+            selected_models = [model_a, model_b]
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail="Vui lòng chọn ít nhất hai model để so sánh.",
+            )
+
         dataframe = await _read_hardware_upload(file)
         try:
-            comparison = compare_hardware_models(
+            comparison = await run_in_threadpool(
+                compare_hardware_models,
                 dataframe,
-                model_a,
-                model_b,
+                selected_models,
             )
         except ValueError as error:
             raise HTTPException(
@@ -950,8 +966,9 @@ async def compare_hardware(
             ) from error
 
         try:
-            comparison["ai_analysis"] = analyze_hardware_comparison(
-                comparison
+            comparison["ai_analysis"] = await run_in_threadpool(
+                analyze_hardware_comparison,
+                comparison,
             )
             comparison["ai_status"] = "available"
         except Exception:
@@ -965,7 +982,7 @@ async def compare_hardware(
             creator_user_id=user.id,
             source_file_sha256=_upload_sha256(file),
             analysis_type="hardware_comparison",
-            title=f"So sánh phần cứng: {model_a} và {model_b}",
+            title=f"So sánh {len(selected_models)} model phần cứng",
             source_filename=file.filename,
             result_data=comparison,
         )

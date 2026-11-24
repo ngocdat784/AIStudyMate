@@ -854,6 +854,7 @@ def _interpret_with_gemini(
 def analyze_production_intelligence(
     dataframe: pd.DataFrame,
     *,
+    column_mapping: dict[str, str] | None = None,
     source_timezone: str = "UTC",
     downtime_unit: str = "minutes",
     cycle_time_unit: str = "seconds",
@@ -863,6 +864,7 @@ def analyze_production_intelligence(
 ) -> dict[str, Any]:
     dataset: ManufacturingDataset = normalize_manufacturing_dataframe(
         dataframe,
+        column_mapping=column_mapping,
         source_timezone=source_timezone,
         downtime_unit=downtime_unit,
         cycle_time_unit=cycle_time_unit,

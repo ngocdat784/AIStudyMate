@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import FileDropzone from "../../components/file-dropzone";
 import { apiFetch } from "../../lib/api";
 import { hasAuthToken, redirectToLogin } from "../../lib/auth";
 
@@ -372,41 +373,38 @@ export default function RootCausePage() {
             />
           </label>
           <div className="root-cause-upload-grid">
-            <label>
-              File kết hợp CSV/XLSX
-              <input
-                type="file"
-                accept=".csv,.xlsx,.xlsm"
-                onChange={(event) => {
-                  setCombinedFile(event.target.files?.[0] ?? null);
-                  setProductionFile(null);
-                  setQualityFile(null);
-                }}
-              />
-            </label>
+            <FileDropzone
+              className="root-cause-file-drop"
+              accept=".csv,.xlsx,.xlsm"
+              title="File kết hợp"
+              files={combinedFile ? [combinedFile] : []}
+              onFilesSelected={(selected) => {
+                setCombinedFile(selected[0] ?? null);
+                setProductionFile(null);
+                setQualityFile(null);
+              }}
+            />
             <span className="root-cause-or">hoặc</span>
-            <label>
-              File sản xuất
-              <input
-                type="file"
-                accept=".csv,.xlsx,.xlsm"
-                onChange={(event) => {
-                  setProductionFile(event.target.files?.[0] ?? null);
-                  setCombinedFile(null);
-                }}
-              />
-            </label>
-            <label>
-              File chất lượng
-              <input
-                type="file"
-                accept=".csv,.xlsx,.xlsm"
-                onChange={(event) => {
-                  setQualityFile(event.target.files?.[0] ?? null);
-                  setCombinedFile(null);
-                }}
-              />
-            </label>
+            <FileDropzone
+              className="root-cause-file-drop"
+              accept=".csv,.xlsx,.xlsm"
+              title="File sản xuất"
+              files={productionFile ? [productionFile] : []}
+              onFilesSelected={(selected) => {
+                setProductionFile(selected[0] ?? null);
+                setCombinedFile(null);
+              }}
+            />
+            <FileDropzone
+              className="root-cause-file-drop"
+              accept=".csv,.xlsx,.xlsm"
+              title="File chất lượng"
+              files={qualityFile ? [qualityFile] : []}
+              onFilesSelected={(selected) => {
+                setQualityFile(selected[0] ?? null);
+                setCombinedFile(null);
+              }}
+            />
           </div>
           <div className="root-cause-options">
             <label>

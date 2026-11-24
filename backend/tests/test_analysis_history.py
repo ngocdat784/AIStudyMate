@@ -484,7 +484,7 @@ class AnalysisHistoryAPITests(unittest.TestCase):
             self.assertIsNotNone(history)
             assert history is not None
             self.assertEqual(history.analysis_type, "hardware_comparison")
-            self.assertEqual(history.title, "So sánh phần cứng: A và B")
+            self.assertEqual(history.title, "So sánh 2 model phần cứng")
             self.assertEqual(history.result_data["ai_status"], "available")
 
     def test_hardware_trend_saves_history_and_dataset_id(self):

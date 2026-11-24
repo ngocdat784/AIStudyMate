@@ -34,9 +34,9 @@ def rate_limit_dependency(
         if not settings.SECURITY_RATE_LIMITS_ENABLED:
             return
 
+        ensure_auth_configured()
         secret = settings.ALERT_AUTH_SECRET
         if not secret or len(secret) < 32:
-            ensure_auth_configured()
             raise RuntimeError("The configured rate-limit secret is invalid.")
         client_host = request.client.host if request.client else "unknown"
         material = f"api-rate-limit:v1:{name}:{client_host}".encode("utf-8")

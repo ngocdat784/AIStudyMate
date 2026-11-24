@@ -2,7 +2,6 @@
 "use client";
 
 import {
-  ChangeEvent,
   FormEvent,
   MouseEvent,
   useEffect,
@@ -11,6 +10,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import FileDropzone from "../components/file-dropzone";
 import { apiFetch } from "../lib/api";
 import { hasAuthToken, redirectToLogin } from "../lib/auth";
 
@@ -300,6 +300,19 @@ type HardwareComparison = {
     model_a: ComparedModel;
     model_b: ComparedModel;
   };
+  model_results: ComparedModel[];
+  selected_models: string[];
+  comparisons: Array<{
+    model_a: string;
+    model_b: string;
+    differences: {
+      production: number;
+      defects: number;
+      defect_rate_percentage_points: number | null;
+      downtime: number;
+    };
+    rate_comparison_status: "available" | "insufficient_production";
+  }>;
   differences: {
     production: number;
     defects: number;
@@ -315,6 +328,24 @@ type HardwareComparison = {
   ai_status: "available" | "unavailable";
   ai_error?: string;
 };
+
+function isHardwareComparison(value: unknown): value is HardwareComparison {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  return (
+    "model_results" in value &&
+    Array.isArray(value.model_results) &&
+    "comparisons" in value &&
+    Array.isArray(value.comparisons) &&
+    "differences" in value &&
+    typeof value.differences === "object" &&
+    value.differences !== null &&
+    "ai_status" in value &&
+    (value.ai_status === "available" || value.ai_status === "unavailable")
+  );
+}
 
 type MultiFileReport = {
   filename: string;
@@ -825,11 +856,8 @@ export default function Home() {
   const [exportError, setExportError] =
     useState("");
 
-  const [selectedModelA, setSelectedModelA] =
-    useState("");
-
-  const [selectedModelB, setSelectedModelB] =
-    useState("");
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  const [comparisonPage, setComparisonPage] = useState(0);
 
   const [comparison, setComparison] =
     useState<HardwareComparison | null>(null);
@@ -917,12 +945,7 @@ export default function Home() {
   // File
   // --------------------------------
 
-  const handleFileChange = (
-    event: ChangeEvent<HTMLInputElement>
-  ) => {
-    const file =
-      event.target.files?.[0];
-
+  const handleFileChange = (file?: File) => {
     if (!file) {
       return;
     }
@@ -942,8 +965,6 @@ export default function Home() {
       setError(
         "Chỉ hỗ trợ file CSV, XLSX, PDF có bảng văn bản hoặc DOCX."
       );
-
-      event.target.value = "";
       return;
     }
 
@@ -954,8 +975,6 @@ export default function Home() {
       setError(
         "File không được vượt quá 10MB."
       );
-
-      event.target.value = "";
       return;
     }
 
@@ -963,16 +982,13 @@ export default function Home() {
     setResult(null);
     setExportError("");
     setComparison(null);
-    setSelectedModelA("");
-    setSelectedModelB("");
+    setComparisonPage(0);
+    setSelectedModels([]);
     setError("");
     setComparisonError("");
   };
 
-  const handleMultipleFilesChange = (
-    event: ChangeEvent<HTMLInputElement>
-  ) => {
-    const files = Array.from(event.target.files ?? []);
+  const handleMultipleFilesChange = (files: File[]) => {
     const unsupportedFile = files.find((file) => {
       const extension = "." + file.name.split(".").pop()?.toLowerCase();
       return ![".csv", ".xlsx"].includes(extension);
@@ -982,7 +998,6 @@ export default function Home() {
       setMultipleError(
         `${unsupportedFile.name}: chỉ hỗ trợ file CSV hoặc XLSX.`
       );
-      event.target.value = "";
       return;
     }
 
@@ -993,7 +1008,6 @@ export default function Home() {
       setMultipleError(
         `${oversizedFile.name}: file không được vượt quá 10MB.`
       );
-      event.target.value = "";
       return;
     }
 
@@ -1239,12 +1253,6 @@ export default function Home() {
     setInterventionResult(null);
     setInterventionError("");
 
-    const input = document.getElementById(
-      "hardware-multiple-files"
-    ) as HTMLInputElement | null;
-    if (input) {
-      input.value = "";
-    }
   };
 
   // --------------------------------
@@ -1363,8 +1371,7 @@ export default function Home() {
             )
         )
       );
-      setSelectedModelA(availableModels[0] || "");
-      setSelectedModelB(availableModels[1] || "");
+      setSelectedModels(availableModels.slice(0, 2));
 
       setTimeout(() => {
         document
@@ -1399,25 +1406,27 @@ export default function Home() {
       return;
     }
 
-    if (!selectedModelA || !selectedModelB) {
-      setComparisonError("Vui lòng chọn đủ hai model.");
+    if (selectedModels.length < 2) {
+      setComparisonError("Vui lòng chọn ít nhất hai model.");
       return;
     }
 
-    if (selectedModelA === selectedModelB) {
-      setComparisonError("Hai model được chọn phải khác nhau.");
+    if (selectedModels.length > comparisonModels.length) {
+      setComparisonError("Số model chọn vượt quá số model trong file phân tích.");
       return;
     }
 
     setComparisonLoading(true);
     setComparisonError("");
     setComparison(null);
+    setComparisonPage(0);
 
     try {
       const formData = new FormData();
       formData.append("file", selectedFile);
-      formData.append("model_a", selectedModelA);
-      formData.append("model_b", selectedModelB);
+      selectedModels.forEach((model) =>
+        formData.append("model_names", model)
+      );
 
       const response = await apiFetch(
         "/api/hardware/compare",
@@ -1426,17 +1435,42 @@ export default function Home() {
           body: formData,
         }
       );
-      const data = await response.json();
+      const responseText = await response.text();
+      let data: unknown = null;
+      if (responseText.trim()) {
+        try {
+          data = JSON.parse(responseText) as unknown;
+        } catch {
+          if (response.ok) {
+            throw new Error(
+              `Máy chủ trả về dữ liệu không hợp lệ (HTTP ${response.status}).`
+            );
+          }
+        }
+      }
 
       if (!response.ok) {
-        throw new Error(
+        const detail =
+          typeof data === "object" &&
+          data !== null &&
+          "detail" in data &&
           typeof data.detail === "string"
             ? data.detail
-            : "Không thể so sánh hai model."
+            : responseText.trim().slice(0, 300);
+        throw new Error(
+          `Yêu cầu so sánh thất bại (HTTP ${response.status})${
+            detail ? `: ${detail}` : "."
+          }`
         );
       }
 
-      setComparison(data as HardwareComparison);
+      if (!isHardwareComparison(data)) {
+        throw new Error(
+          `Máy chủ trả về kết quả so sánh không hợp lệ (HTTP ${response.status}).`
+        );
+      }
+
+      setComparison(data);
     } catch (error) {
       console.error(error);
       setComparisonError(
@@ -1484,19 +1518,10 @@ export default function Home() {
     setResult(null);
     setExportError("");
     setComparison(null);
-    setSelectedModelA("");
-    setSelectedModelB("");
+    setSelectedModels([]);
     setError("");
     setComparisonError("");
 
-    const input =
-      document.getElementById(
-        "hardware-file"
-      ) as HTMLInputElement | null;
-
-    if (input) {
-      input.value = "";
-    }
   };
 
   // --------------------------------
@@ -1575,43 +1600,62 @@ export default function Home() {
       )
     : [];
 
-  const comparisonMetrics = comparison
+  const comparisonMetrics: Array<{
+    key: string;
+    label: string;
+    unit: string;
+    differenceKey: keyof HardwareComparison["differences"];
+    getValue: (model: ComparedModel) => number | null;
+  }> = comparison
     ? [
         {
           key: "production",
           label: "Production",
           unit: "sản phẩm",
-          valueA: comparison.models.model_a.production,
-          valueB: comparison.models.model_b.production,
-          difference: comparison.differences.production,
+          differenceKey: "production",
+          getValue: (model: ComparedModel) => model.production,
         },
         {
           key: "defects",
           label: "Defects",
           unit: "lỗi",
-          valueA: comparison.models.model_a.defects,
-          valueB: comparison.models.model_b.defects,
-          difference: comparison.differences.defects,
+          differenceKey: "defects",
+          getValue: (model: ComparedModel) => model.defects,
         },
         {
           key: "defect_rate",
           label: "Defect Rate",
           unit: "%",
-          valueA: comparison.models.model_a.defect_rate,
-          valueB: comparison.models.model_b.defect_rate,
-          difference:
-            comparison.differences.defect_rate_percentage_points,
+          differenceKey: "defect_rate_percentage_points",
+          getValue: (model: ComparedModel) => model.defect_rate,
         },
         {
           key: "downtime",
           label: "Downtime",
           unit: "phút",
-          valueA: comparison.models.model_a.downtime,
-          valueB: comparison.models.model_b.downtime,
-          difference: comparison.differences.downtime,
+          differenceKey: "downtime",
+          getValue: (model: ComparedModel) => model.downtime,
         },
       ]
     : [];
+
+  const comparisonByModel = useMemo(
+      () =>
+        new Map(
+          (comparison?.comparisons ?? []).map((item) => [item.model_b, item])
+        ),
+      [comparison]
+  );
+  const comparisonPageSize = 50;
+  const comparisonPageCount = comparison
+      ? Math.ceil(comparison.model_results.length / comparisonPageSize)
+      : 0;
+  const comparisonPageModels = comparison
+      ? comparison.model_results.slice(
+          comparisonPage * comparisonPageSize,
+          (comparisonPage + 1) * comparisonPageSize
+        )
+      : [];
 
   const formatComparisonValue = (
     value: number | null,
@@ -1781,39 +1825,24 @@ export default function Home() {
             onSubmit={handleSubmit}
           >
 
-            <label
-              htmlFor="hardware-file"
-              className="production-upload"
-            >
-
-              <div className="upload-plus">
-                +
-              </div>
-
-              <div>
-
-                <strong>
-                  Upload hardware data
-                </strong>
-
-                <span>
-                  CSV, XLSX, PDF dạng bảng hoặc DOCX · Max 10MB
-                </span>
-
-              </div>
-
-            </label>
-
-            <input
-              id="hardware-file"
-              type="file"
+            <FileDropzone
               accept=".csv,.xlsx,.pdf,.docx"
-              onChange={
-                handleFileChange
-              }
+              title="Upload hardware data"
+              hint="CSV, XLSX, PDF dạng bảng hoặc DOCX · Max 10MB"
+              className="file-dropzone-home"
+              showSelectedFiles={false}
               disabled={loading || comparisonLoading}
-              hidden
-            />
+              onFilesSelected={(selected) => handleFileChange(selected[0])}
+            >
+              <div className="upload-plus">+</div>
+              <div>
+                <strong>Upload hardware data</strong>
+                <span>
+                  CSV, XLSX, PDF dạng bảng hoặc DOCX · Max 10MB · Kéo thả hoặc
+                  nhấn để chọn
+                </span>
+              </div>
+            </FileDropzone>
 
 
 
@@ -2067,25 +2096,25 @@ export default function Home() {
             )}
           </div>
 
-          <label
-            htmlFor="hardware-multiple-files"
-            className="production-upload"
+          <FileDropzone
+            accept=".csv,.xlsx"
+            title="Chọn các file dữ liệu"
+            hint="CSV hoặc XLSX · 2–10 file · Tối đa 10MB mỗi file"
+            multiple
+            className="file-dropzone-home"
+            showSelectedFiles={false}
+            disabled={multipleLoading || trendLoading}
+            onFilesSelected={handleMultipleFilesChange}
           >
             <div className="upload-plus">+</div>
             <div>
               <strong>Chọn các file dữ liệu</strong>
-              <span>CSV hoặc XLSX · 2–10 file · Tối đa 10MB mỗi file</span>
+              <span>
+                CSV hoặc XLSX · 2–10 file · Tối đa 10MB mỗi file · Kéo thả hoặc
+                nhấn để chọn
+              </span>
             </div>
-          </label>
-          <input
-            id="hardware-multiple-files"
-            type="file"
-            accept=".csv,.xlsx"
-            multiple
-            onChange={handleMultipleFilesChange}
-            disabled={multipleLoading || trendLoading}
-            hidden
-          />
+          </FileDropzone>
 
           {multipleFiles.length > 0 && (
             <div className="multi-selected-files">
@@ -2888,7 +2917,7 @@ export default function Home() {
               <div className="dashboard-card-header">
                 <div>
                   <span>02</span>
-                  <h3>So sánh hai model</h3>
+                  <h3>So sánh model</h3>
                 </div>
                 <p>Compare model KPIs</p>
               </div>
@@ -2902,60 +2931,47 @@ export default function Home() {
               ) : (
                 <>
                   <div className="comparison-controls">
-                    <label>
-                      <span>Model A</span>
-                      <select
-                        value={selectedModelA}
-                        onChange={(event) =>
-                          setSelectedModelA(event.target.value)
-                        }
-                      >
-                        {comparisonModels.map((model) => (
-                          <option key={model} value={model}>
-                            {model}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <span className="comparison-versus">VS</span>
-
-                    <label>
-                      <span>Model B</span>
-                      <select
-                        value={selectedModelB}
-                        onChange={(event) =>
-                          setSelectedModelB(event.target.value)
-                        }
-                      >
-                        {comparisonModels.map((model) => (
-                          <option key={model} value={model}>
-                            {model}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
+                    <fieldset className="comparison-model-options">
+                      <legend>
+                        Chọn model cần so sánh ({selectedModels.length}/
+                        {comparisonModels.length})
+                      </legend>
+                      {comparisonModels.map((model) => (
+                        <label key={model}>
+                          <input
+                            type="checkbox"
+                            checked={selectedModels.includes(model)}
+                            onChange={(event) => {
+                              setSelectedModels((current) =>
+                                event.target.checked
+                                  ? [...current, model]
+                                  : current.filter((item) => item !== model)
+                              );
+                              setComparison(null);
+                              setComparisonPage(0);
+                              setComparisonError("");
+                            }}
+                          />
+                          <span>{model}</span>
+                        </label>
+                      ))}
+                    </fieldset>
                     <button
                       type="button"
                       className="comparison-button"
                       onClick={handleCompare}
-                      disabled={
-                        comparisonLoading ||
-                        !selectedModelA ||
-                        !selectedModelB ||
-                        selectedModelA === selectedModelB
-                      }
+                      disabled={comparisonLoading || selectedModels.length < 2}
                     >
                       {comparisonLoading
                         ? "Đang so sánh..."
-                        : "So sánh model"}
+                        : `So sánh ${selectedModels.length} model`}
                     </button>
                   </div>
 
-                  {selectedModelA === selectedModelB && (
+                  {selectedModels.length < 2 && (
                     <p className="comparison-hint">
-                      Chọn hai model khác nhau để tiếp tục.
+                      Chọn ít nhất hai model; số lượng tối đa bằng số model có
+                      trong file phân tích.
                     </p>
                   )}
 
@@ -2983,32 +2999,29 @@ export default function Home() {
                         <strong>
                           {comparison.rate_comparison_status ===
                           "insufficient_production"
-                            ? "Chưa thể so sánh tỷ lệ lỗi"
+                            ? "Chưa thể so sánh tỷ lệ lỗi của tất cả model"
                             : comparison.higher_defect_rate_model
-                              ? `${comparison.higher_defect_rate_model} có tỷ lệ lỗi cao hơn`
-                              : "Tỷ lệ lỗi của hai model bằng nhau"}
+                              ? `${comparison.higher_defect_rate_model} có tỷ lệ lỗi cao nhất`
+                              : "Tỷ lệ lỗi của các model bằng nhau"}
                         </strong>
                         <p>
-                          {comparison.differences
-                            .defect_rate_percentage_points === null
-                            ? "Production bằng 0 ở ít nhất một model nên không thể xác định tỷ lệ lỗi."
-                            : `Chênh lệch tỷ lệ lỗi: ${Math.abs(
-                                comparison.differences
-                                  .defect_rate_percentage_points
-                              ).toLocaleString("vi-VN", {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })} điểm phần trăm (B − A).`}
+                          {comparison.rate_comparison_status ===
+                          "insufficient_production"
+                            ? "Production bằng 0 ở ít nhất một model nên không thể so sánh đầy đủ tỷ lệ lỗi."
+                            : `Các chênh lệch tỷ lệ lỗi được tính so với model mốc ${comparison.model_results[0].name} và hiển thị bên dưới.`}
                         </p>
                       </div>
 
                       <div className="comparison-chart">
                         {comparisonMetrics.map((metric) => {
-                          const values = [
-                            metric.valueA || 0,
-                            metric.valueB || 0,
-                          ];
-                          const maxValue = Math.max(...values, 1);
+                          const maxValue = comparison.model_results.reduce(
+                            (maximum, model) =>
+                              Math.max(
+                                maximum,
+                                metric.getValue(model) || 0
+                              ),
+                            1
+                          );
 
                           return (
                             <div
@@ -3017,33 +3030,33 @@ export default function Home() {
                             >
                               <div className="comparison-chart-title">
                                 <strong>{metric.label}</strong>
-                                <span>
-                                  Δ{" "}
-                                  {formatComparisonValue(
-                                    metric.difference,
-                                    metric.key === "defect_rate"
-                                      ? "điểm %"
-                                      : metric.unit
-                                  )}
-                                </span>
+                                <span>Giá trị và chênh lệch so với model đầu tiên</span>
                               </div>
-                              {[0, 1].map((index) => {
-                                const model =
-                                  index === 0
-                                    ? comparison.models.model_a
-                                    : comparison.models.model_b;
-                                const value =
-                                  index === 0
-                                    ? metric.valueA
-                                    : metric.valueB;
+                              {comparisonPageModels.map((model, pageIndex) => {
+                                const index =
+                                  comparisonPage * comparisonPageSize +
+                                  pageIndex;
+                                const value = metric.getValue(model);
                                 const numericValue = value || 0;
+                                const compared = comparisonByModel.get(
+                                  model.name
+                                );
+                                const difference =
+                                  index === 0
+                                    ? null
+                                    : compared?.differences[
+                                        metric.differenceKey
+                                      ] ?? null;
 
                                 return (
                                   <div
                                     className="comparison-bar-row"
                                     key={model.name}
                                   >
-                                    <span>{model.name}</span>
+                                    <span>
+                                      {model.name}
+                                      {index === 0 ? " · Mốc" : ""}
+                                    </span>
                                     <div className="comparison-bar-track">
                                       <div
                                         className={
@@ -3063,6 +3076,17 @@ export default function Home() {
                                         value,
                                         metric.unit
                                       )}
+                                      {index > 0 && (
+                                        <small className="comparison-row-difference">
+                                          Δ{" "}
+                                          {formatComparisonValue(
+                                            difference,
+                                            metric.key === "defect_rate"
+                                              ? "điểm %"
+                                              : metric.unit
+                                          )}
+                                        </small>
+                                      )}
                                     </strong>
                                   </div>
                                 );
@@ -3071,6 +3095,46 @@ export default function Home() {
                           );
                         })}
                       </div>
+                      {comparisonPageCount > 1 && (
+                        <div className="comparison-pagination">
+                          <span>
+                            Hiển thị {comparisonPage * comparisonPageSize + 1}
+                            –
+                            {Math.min(
+                              (comparisonPage + 1) * comparisonPageSize,
+                              comparison.model_results.length
+                            )}{" "}
+                            / {comparison.model_results.length} model
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setComparisonPage((current) =>
+                                Math.max(0, current - 1)
+                              )
+                            }
+                            disabled={comparisonPage === 0}
+                          >
+                            Trước
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setComparisonPage((current) =>
+                                Math.min(
+                                  comparisonPageCount - 1,
+                                  current + 1
+                                )
+                              )
+                            }
+                            disabled={
+                              comparisonPage >= comparisonPageCount - 1
+                            }
+                          >
+                            Tiếp
+                          </button>
+                        </div>
+                      )}
 
                       {comparison.ai_analysis ? (
                         <div className="comparison-ai">

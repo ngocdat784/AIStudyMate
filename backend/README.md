@@ -8,8 +8,15 @@ Run the schema migration before starting the API:
 python -m alembic upgrade head
 ```
 
-Set these variables in the backend environment before using monitoring
-authentication:
+For local development, if `ALERT_AUTH_SECRET` is unset or shorter than 32
+characters, the backend generates a cryptographically random, temporary
+secret on the first authentication request. This lets an existing admin sign
+in without entering a token; login creates and returns the normal bearer
+access token. The temporary secret is process-local, so rate-limit bucket
+identifiers can change after a backend restart. Set a stable secret if that is
+undesirable.
+
+Production still requires an explicitly configured stable secret. Configure:
 
 ```text
 ALERT_AUTH_SECRET=<at-least-32-random-characters>
@@ -17,13 +24,23 @@ ALERT_BOOTSTRAP_TOKEN=<one-time-admin-bootstrap-token>
 ```
 
 Create the first administrator at `POST /api/monitoring/auth/bootstrap-admin`
-with that bootstrap token. Public signup creates viewer accounts only. An
+with the one-time bootstrap token. Existing administrators sign in through
+`POST /api/monitoring/auth/login`; they do not need the bootstrap token.
+Public signup creates viewer accounts only. An
 administrator can create operator accounts, change roles, and assign or revoke
 Plant access. Operators and viewers can access only assigned Plants; viewers
 are read-only, while operators can manage monitoring data, rules, and alerts
 within their assigned Plants. Dataset deletion and Plant creation/deletion are
 administrator-only. Plant access is checked from the database on each request,
 so revoking an assignment takes effect without waiting for token expiry.
+Legacy bcrypt password hashes are verified at login and upgraded to the
+backend's scrypt format after a successful authentication.
+Because stored password hashes do not reveal the original password length,
+successful login verifies whether a legacy password is shorter than 12
+characters. In that case the backend revokes existing sessions and requires
+one one-time password reset, using a short-lived reset token returned only to
+that authenticated login. The new password must be at least 12 characters
+before the user can sign in normally.
 
 After upgrading an existing deployment, assign Plants to each operator and
 viewer in the monitoring dashboard. Existing accounts are not automatically
@@ -279,6 +296,235 @@ verification plan are stored in the continuous-improvement tracker. A due date
 is a proposed target and must be confirmed by the responsible manager.
 Migration `9f3c7a2d6e10` adds the action-planning fields to
 `improvement_cases`.
+
+## Machine Intelligence (Phase 2.4)
+
+`POST /api/machine-intelligence/analyze` accepts a CSV/XLSX machine dataset.
+The `/machine-intelligence` page supports source timezone and duration units;
+the result is saved to Analysis History. Recognized columns include Machine,
+Machine Status, Available Time, Operating Time, Downtime, Downtime Type,
+Downtime Planned, Standard Cycle Time, Defects/inspection counts, Line, and
+Shift. Maintenance Action and Maintenance Outcome are included when supplied.
+Machine/status/downtime and maintenance fields also accept common snake_case
+aliases.
+
+Availability uses operating time / scheduled time after planned downtime;
+Performance uses standard cycle time × production / operating time; Quality
+uses first-pass or inspection counts, then falls back to production less
+defects. OEE is their product and is withheld when a component or denominator
+is missing or outside 0–100%. MTBF and MTTR use observed failure counts and
+operating/unplanned-downtime durations. Missing inputs remain null; metrics
+are not imputed.
+
+Machine events are normalized from supplied row-level status, downtime,
+planned flag, and reason; the engine does not infer event intervals or machine
+state transitions from sampled signals. Downtime Pareto and maintenance risk
+are descriptive screening results. Anomaly checks use historical IQR or
+within-machine first-half/second-half performance; they require enough data
+and are not predictive maintenance. Maintenance outcomes are displayed from
+uploaded history, not written back as work orders or automatically verified.
+
+## Material Intelligence (Phase 2.5)
+
+`POST /api/material-intelligence/analyze` accepts CSV/XLSX and saves the result
+to Analysis History. The `/material-intelligence` page supports material
+consumption, cost, lot traceability, supplier quality, and process-loss
+analysis. Canonical inputs include Material/Material Type/Material Lot,
+Material Unit, Planned/Actual Consumption, Material Unit Cost/Material Cost,
+Material Loss/Scrap Material, Material Currency, Supplier, Product, Process,
+Batch, Production, Defects/inspection counts, and Date. Common snake_case
+aliases are accepted.
+
+Mass is normalized to grams, volume to milliliters, and piece/count units to
+pieces. Unknown units are preserved as their own unit and are not converted
+across unit families. Consumption variance uses records with both planned and
+actual values; usage rate uses paired material consumption and production.
+Yield/waste require explicit loss or scrap and actual consumption. Costs use
+explicit total cost or actual quantity × unit price; totals across different
+or unspecified currencies are not combined.
+
+Material-lot traceability joins lot, material, supplier, product, process, and
+production batch present on the same input records. Defect-associated lots
+represent observed association only, not causation. Supplier defect rates use
+paired defect and inspected/produced quantities; monthly trends require valid
+timestamps. Supplier risk tiers are transparent screening heuristics and are
+marked insufficient with fewer than three paired quality records. With enough
+records, high risk is screened at a defect rate of at least five percent or
+monthly volatility of at least five percentage points; medium risk is above
+the peer median or has volatility of at least two points. These are review
+thresholds, not supplier certification.
+
+Gemini interpretation is opt-in (`include_ai=false` by default); Python KPIs
+and evidence remain available without Gemini. When enabled, derived material
+aggregates, traceability mappings, and evidence are submitted for
+interpretation; returned claims must reference known evidence IDs. Do not
+enable it for sensitive datasets unless their external processing is
+permitted.
+
+## Predictive Intelligence (Phase 2.6)
+
+`POST /api/predictive-intelligence/analyze` accepts an authenticated CSV/XLSX
+upload and saves the result to Analysis History. The
+`/predictive-intelligence` page exposes a 1–30 day horizon, a configurable
+quality threshold, and explicitly parameterized what-if inputs. Date,
+Production, planned production, inspection/defect counts, machine state,
+downtime, available/operating time, material, actual consumption, and material
+stock are optional; unsupported predictions are returned as
+`insufficient_data`.
+
+The engine aggregates timestamped records by observed calendar day. Features
+use only prior observed periods (lag-1, lag-7, rolling mean/standard deviation,
+and elapsed days). Each target receives separate chronological train,
+validation, and test ranges. Validation selects between last-observation and
+seven-observation moving-average baselines; the holdout test is excluded from
+selection and reports MAE, RMSE, and sMAPE. A forecast requires at least 15
+valid observations, eight feature rows, 50% calendar coverage, and minimum
+train/validation/test sizes. Missing dates and invalid/missing production
+values are not filled with zero. No machine learning model is trained.
+Production plan completion is screened from the
+forecasted daily actual-to-plan ratio when both quantities are explicitly
+available.
+
+Prediction intervals, when at least five holdout errors exist, use an empirical
+90th-percentile absolute test error scaled by the square root of the forecast
+horizon. Their coverage is not guaranteed. Confidence is a low/medium/high
+screen based on holdout sMAPE and sample count, not a probability.
+Quality-threshold flags compare point forecasts with the configured threshold.
+Machine failure probability is not inferred: with at least 20 labeled days and
+three labeled failure days, the API reports historical failure-day frequency
+and a Wilson interval only, including per-machine rates when Machine is
+identified. Material shortage signals require explicit stock and forecastable
+consumption in matching normalized units. Material quality-risk forecasts are
+available only when material can be paired with inspected/defective or
+production/defect data. Drift compares the
+last seven observed values with the earlier baseline; it is an offline screen,
+not ongoing model monitoring.
+
+What-if scenarios are deterministic sensitivity calculations: the entered
+capacity and material-shortage changes scale output linearly; the downtime
+scenario scales output with runtime while holding other factors fixed; quality
+improvement adjusts the forecast defect-rate points. These assumptions are
+returned with the result and are not causal estimates or validated capacity
+models. The upload is not sent to Gemini or another external AI provider.
+
+## Enterprise Intelligence (Phase 2.7)
+
+`GET /api/enterprise-intelligence/overview` combines the latest Production,
+Quality, Machine, Material, Predictive, and Root Cause analysis with active
+monitoring alerts, improvement cases, user activity, AI-audit aggregates,
+source traceability, and report-source readiness. Administrators can view all
+analysis histories; other roles see only their own analysis histories and
+activity, plus alerts, improvement cases, and governed reports within their
+assigned Plant scope. AI audit details are administrator-only, and prompts or
+responses are never included in this overview.
+
+The recommendation engine ranks deterministic Python recommendations already
+present in saved analyses, machine maintenance priorities, material-loss
+signals and screened supplier-quality risks, predictive threshold/shortage
+signals, and root-cause actions. Each recommendation includes source Analysis
+History ID, evidence IDs when present, priority, and an observed-impact basis.
+It is a review queue, not an
+automatically-created maintenance order or a causal claim. Analysis History
+remains the recommendation source record; the existing improvement-case
+workflow records action owner, priority, deadline, implementation, before/after
+measurements, confounders, and evaluation.
+
+Existing monitoring alerts retain their severity, deduplication, assignment,
+acknowledgement/status lifecycle, and status history. The overview includes
+active alerts without changing their state. Improvement deadlines are flagged
+as overdue and require escalation; notification/escalation routing is still a
+manager action, not an automatic scheduler. User actions are read from the
+existing audit trail.
+
+Daily Production, Weekly Quality, Monthly Performance, Machine Reliability,
+Material Consumption, Predictive Risk, and Executive Manufacturing templates
+show whether their source analyses are current, missing, or stale for the
+selected 1–365 day window. They provide source history IDs and summaries for
+the existing Governed Reports workflow, which persists versions and supports
+review, approval, publication, and export. This endpoint reports readiness; it
+does not silently publish or fabricate a period report when a source is absent.
+
+## System Integration & Final Acceptance (Phase 2.8)
+
+`POST /api/system-integration/analyze` accepts one combined CSV/XLSX file and
+runs the shared Manufacturing Analytics Engine plus Production, Quality, Root
+Cause, Machine, Material, and Predictive Intelligence. The request uses one
+column mapping, source timezone, and unit configuration; the response carries
+a versioned unified result, a consistent per-domain status/summary/evidence
+envelope, cross-domain findings, and one saved `system_integration` Analysis
+History record. History and audit records link the result to the user and
+source-file checksum.
+
+Numeric cross-domain associations are reported only when at least eight
+paired observations are available and absolute Spearman correlation is at
+least 0.6. Material lot findings are traceability links to recorded defects,
+not proof that a lot caused them. Machine failure frequency combined with a
+production forecast is a joint review signal, not a forecast of machine-caused
+production loss. Evidence IDs in the combined result are domain-scoped to avoid
+collisions between the component engines. Missing statistical history returns
+an insufficient/limited status instead of a fabricated forecast.
+
+Gemini is off by default. When explicitly enabled, only the Root Cause
+cross-domain interpretation invokes the configured Gemini service; computed
+domain results remain deterministic Python outputs. The endpoint is limited
+to administrators/operators, checks optional Plant access, and is rate-limited
+to three runs per minute. The shared parser enforces 10 MB and 100,000 rows;
+this multi-engine route further caps analysis at 2,000 rows per request. A
+local synthetic smoke measurement took about 1.8 seconds at 1,000 rows and
+4.0 seconds at 2,000 rows, compared with 17.8 seconds at 5,000 rows. These
+single-process measurements are not an SLA or a production load test. The
+browser view is available at `/system-integration`.
+
+Acceptance coverage includes individual engine KPI/evidence tests, forecasting
+backtests and leakage checks, Root Cause evidence validation, enterprise
+workflow/history tests, and an end-to-end integrated upload covering all six
+domains, mapping, cross-domain correlations/traceability, audit persistence,
+history retrieval, sparse-data handling, missing required production data, and
+unauthenticated access. A PostgreSQL-gated integration test also persists and
+reads the unified result and audit JSON; the CI PostgreSQL job runs migrations
+and enables this test with `RUN_POSTGRES_INTEGRATION=1`.
+
+### Architecture and acceptance status
+
+The six domain services are separate modules, not six copies of a data model:
+they consume the shared `ManufacturingDataset` normalization/data-quality
+contract, while the Manufacturing Analytics Engine and System Integration
+orchestrator provide the common analysis path. Domain-specific KPI and
+statistical calculations remain deterministic Python code. This is a shared
+core with specialized analyzers, not a single monolithic calculator.
+
+| Requirement | Implementation / evidence | Acceptance boundary |
+| --- | --- | --- |
+| Single Core Engine | Shared data foundation, Manufacturing Analytics Engine, and unified orchestrator | Domain modules retain specialized calculations; do not treat correlation or the orchestration wrapper as causal analysis. |
+| Deterministic KPI | KPI formulas are implemented in Python and covered by expected-value tests | LLM output is not the source of KPI values. |
+| Evidence-based AI | Evidence IDs, validation, and limitation handling are covered by engine and integration tests | Gemini is optional; no live Gemini call is part of local verification. |
+| Data Quality First | Shared normalization validates/excludes invalid records and reports quality and warnings | Results remain limited when required data/history is absent. |
+| Explainability | Results include evidence, summaries, warnings, and analysis limitations | Heuristic findings are not presented as proven causes. |
+| Confidence-aware | Confidence and insufficient-data states are emitted and tested | Confidence is heuristic, not a calibrated probability. |
+| Modular Architecture | Production, Quality, Root Cause, Machine, Material, Predictive, and Enterprise services/routes | Each module remains responsible for its domain-specific logic. |
+| Shared Data Model | Domain services use the canonical manufacturing dataset and mappings | Source-specific columns/units still require valid mapping and configuration. |
+| Traceability | Source checksum, Analysis History, evidence references, and action audit | Traceability is limited to supplied source data and persisted records. |
+| Human-in-the-loop | Enterprise workflow supports assignment, deadlines, status, and review/approval steps | AI recommendations do not autonomously execute corrective actions. |
+| Business logic and formulas | Domain tests exercise supported metrics and insufficient-data cases | No claim is made for unavailable source fields. |
+| API | Authenticated routes and integration tests cover the supported analysis/workflow APIs | File ingestion is CSV/XLSX; direct MES/ERP/PLC connectors are not included. |
+| Frontend | `npm run lint` and `npm run build` pass; `/system-integration` was smoke-tested in a browser | No automated browser end-to-end suite currently covers all pages and authenticated workflows. |
+| PostgreSQL | CI upgrades PostgreSQL migrations and runs the PostgreSQL-gated suite; the added integration test checks JSON history/audit round-trip | PostgreSQL was not available/enabled in this local test run; CI execution is the verification gate. |
+| Standard test data | Deterministic synthetic datasets/fixtures exercise domain and integrated scenarios | No representative, governed customer/MES dataset was supplied. |
+| Accuracy evaluation | Expected-value KPI tests and predictive backtests/leakage checks run in the test suite | No production-data accuracy certification or cross-customer benchmark is claimed. |
+| Integration testing | Backend suite includes integrated upload, history/audit, auth, sparse-data, and domain tests | Local PostgreSQL-gated tests are skipped unless the CI database settings are provided. |
+| Documentation and evidence | This README describes behavior, formulas/limits, test coverage, and deployment caveats | Final operational sign-off requires target-environment evidence. |
+
+Latest local verification for this workspace: backend `327 passed, 20 skipped,
+12 subtests passed`; frontend lint and production build passed; the integration
+page rendered in the browser. The skipped tests include environment-gated
+PostgreSQL cases. No Gemini request was made and `backend/.env` was not read.
+
+This is deterministic integration and test acceptance, not certification for
+unbounded production scale. No representative customer/MES data, sustained
+concurrent-load test, database load test, memory stress test, or Gemini
+latency/SLA test is part of this acceptance. Validate those deployment-specific
+limits with the target database, infrastructure, and governed production
+dataset before a broad rollout.
 
 ## Industrial file integrations
 

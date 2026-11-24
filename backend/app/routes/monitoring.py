@@ -30,9 +30,9 @@ from app.models.monitoring import (
     AlertNotification,
     AlertRule,
     AlertStatusHistory,
+    AlertUser,
     AlertUserDepartment,
     AlertUserFactory,
-    AlertUser,
     AlertUserPlant,
     AuthSession,
     Department,
@@ -47,13 +47,14 @@ from app.services.monitoring_auth import (
     LOGIN_FAILURE_LIMIT,
     LOGIN_LOCK_SECONDS,
     PASSWORD_RESET_TTL_SECONDS,
+    accessible_plant_ids,
     create_access_token,
     ensure_auth_configured,
-    get_current_user,
     get_current_session,
+    get_current_user,
     hash_password,
-    accessible_plant_ids,
     has_plant_access,
+    password_hash_needs_upgrade,
     require_plant_access,
     require_roles,
     revoke_user_sessions,
@@ -92,10 +93,14 @@ class Credentials(BaseModel):
         return normalized
 
 
+class LoginCredentials(Credentials):
+    password: str = Field(min_length=1, max_length=256)
+
+
 class PasswordChangeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    current_password: str = Field(min_length=12, max_length=256)
+    current_password: str = Field(min_length=1, max_length=256)
     new_password: str = Field(min_length=12, max_length=256)
 
 
@@ -453,7 +458,7 @@ def signup(request: SignupRequest, db: Session = Depends(get_db)):
     ],
 )
 def login(
-    request: Credentials,
+    request: LoginCredentials,
     http_request: Request,
     db: Session = Depends(get_db),
 ):
@@ -493,10 +498,35 @@ def login(
             )
         db.commit()
         raise HTTPException(status_code=401, detail="Email hoặc mật khẩu không đúng.")
+    if password_hash_needs_upgrade(user.password_hash):
+        user.password_hash = hash_password(request.password)
     user.failed_login_attempts = 0
     user.locked_until = None
     user.account_status = "active"
     user.last_login_at = now
+    if len(request.password) < 12:
+        raw_token = secrets.token_urlsafe(48)
+        db.add(
+            PasswordResetToken(
+                user_id=user.id,
+                token_hash=hashlib.sha256(raw_token.encode("ascii")).hexdigest(),
+                expires_at=now + timedelta(seconds=PASSWORD_RESET_TTL_SECONDS),
+            )
+        )
+        revoke_user_sessions(db, user.id)
+        record_user_action(
+            db,
+            actor=user,
+            action="account.password_upgrade_required",
+            object_type="alert_user",
+            object_id=str(user.id),
+            after_data={"minimum_password_length": 12, "sessions_revoked": True},
+        )
+        db.commit()
+        return {
+            "password_change_required": True,
+            "password_reset_token": raw_token,
+        }
     db.flush()
     token = create_access_token(db, user, http_request)
     db.commit()

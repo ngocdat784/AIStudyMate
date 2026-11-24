@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 
+import FileDropzone from "../../components/file-dropzone";
 import { apiFetch } from "../../lib/api";
 
 type Metric = {
@@ -302,18 +303,16 @@ export default function ProductionIntelligencePage() {
         </header>
 
         <form className="executive-card production-upload" onSubmit={submitAnalysis}>
-          <label>
-            File sản xuất (CSV/XLSX)
-            <input
-              type="file"
-              accept=".csv,.xlsx"
-              onChange={(event) => {
-                setFile(event.target.files?.[0] ?? null);
-                setResult(null);
-                setError("");
-              }}
-            />
-          </label>
+          <FileDropzone
+            accept=".csv,.xlsx"
+            title="File sản xuất"
+            files={file ? [file] : []}
+            onFilesSelected={(selected) => {
+              setFile(selected[0] ?? null);
+              setResult(null);
+              setError("");
+            }}
+          />
           <label>
             Source timezone (IANA)
             <input

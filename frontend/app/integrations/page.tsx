@@ -1,6 +1,7 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import FileDropzone from "../../components/file-dropzone";
 import { apiFetch } from "../../lib/api";
 import { hasAuthToken, redirectToLogin } from "../../lib/auth";
 
@@ -222,8 +223,7 @@ export default function IntegrationsPage() {
     );
   }
 
-  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const chosen = event.target.files?.[0] ?? null;
+  async function handleFileChange(chosen: File | null) {
     setFile(chosen);
     setPreview(null);
     setMapping({});
@@ -584,14 +584,16 @@ export default function IntegrationsPage() {
               Chuẩn hóa mã sản phẩm, model, component, supplier, batch và máy
               thành chữ hoa
             </label>
-            <label>
-              Chọn file nguồn
-              <input
-                type="file"
-                accept=".csv,.xlsx"
-                onChange={(event) => void handleFileChange(event)}
-              />
-            </label>
+            <FileDropzone
+              accept=".csv,.xlsx"
+              title="Chọn file nguồn"
+              files={file ? [file] : []}
+              showSelectedFiles={false}
+              disabled={busy}
+              onFilesSelected={(selected) =>
+                void handleFileChange(selected[0] ?? null)
+              }
+            />
             {file && (
               <div className="integration-file-meta">
                 <strong>{file.name}</strong>

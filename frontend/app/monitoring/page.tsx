@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import FileDropzone from "../../components/file-dropzone";
 import { AUTH_CHANGED_EVENT, notifyAuthChanged } from "../../lib/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -182,6 +183,9 @@ export default function MonitoringPage() {
   const [password, setPassword] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [passwordUpgradeToken, setPasswordUpgradeToken] = useState("");
+  const [passwordUpgradeValue, setPasswordUpgradeValue] = useState("");
+  const [passwordUpgradeConfirmation, setPasswordUpgradeConfirmation] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [bootstrapToken, setBootstrapToken] = useState("");
   const [error, setError] = useState("");
@@ -217,7 +221,7 @@ export default function MonitoringPage() {
   const [selectedFactoryId, setSelectedFactoryId] = useState("");
   const [selectedDepartmentId, setSelectedDepartmentId] = useState("");
   const [lineName, setLineName] = useState("");
-  const [files, setFiles] = useState<FileList | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [granularity, setGranularity] = useState("day");
   const [interval, setInterval] = useState("1");
   const [unit, setUnit] = useState("days");
@@ -301,6 +305,34 @@ export default function MonitoringPage() {
       setToken("");
       setUser(null);
       setError("Mật khẩu đã đổi; mọi phiên bị thu hồi. Hãy đăng nhập lại.");
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
+  }
+
+  async function upgradePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (passwordUpgradeValue !== passwordUpgradeConfirmation) {
+      setError("Mật khẩu xác nhận không khớp.");
+      return;
+    }
+
+    try {
+      await request("/api/monitoring/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify({
+          token: passwordUpgradeToken,
+          new_password: passwordUpgradeValue,
+        }),
+      });
+      setPasswordUpgradeToken("");
+      setPasswordUpgradeValue("");
+      setPasswordUpgradeConfirmation("");
+      setPassword("");
+      setAuthMode("login");
+      setMessage("Đã cập nhật mật khẩu. Vui lòng đăng nhập bằng mật khẩu mới.");
     } catch (cause) {
       setError((cause as Error).message);
     }
@@ -397,10 +429,27 @@ export default function MonitoringPage() {
         ...(authMode === "signup" || authMode === "bootstrap" ? { display_name: displayName } : {}),
         ...(authMode === "bootstrap" ? { bootstrap_token: bootstrapToken } : {}),
       };
-      const result = await request<{ access_token: string; user: User }>(endpoint, {
+      const result = await request<{
+        access_token?: string;
+        user?: User;
+        password_change_required?: boolean;
+        password_reset_token?: string;
+      }>(endpoint, {
         method: "POST",
         body: JSON.stringify(body),
       });
+      if (result.password_change_required) {
+        if (!result.password_reset_token) {
+          throw new Error("Máy chủ không trả token cập nhật mật khẩu.");
+        }
+        setPasswordUpgradeToken(result.password_reset_token);
+        setPassword("");
+        setMessage("Mật khẩu hiện tại ngắn hơn 12 ký tự. Hãy đặt mật khẩu mới để tiếp tục.");
+        return;
+      }
+      if (!result.access_token || !result.user) {
+        throw new Error("Máy chủ trả về thông tin đăng nhập không hợp lệ.");
+      }
       window.localStorage.setItem("monitoring-token", result.access_token);
       notifyAuthChanged();
       setToken(result.access_token);
@@ -580,9 +629,9 @@ export default function MonitoringPage() {
 
   async function uploadSnapshot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!files?.length || !selectedPlant) return;
+    if (!files.length || !selectedPlant) return;
     const form = new FormData();
-    Array.from(files).forEach((file) => form.append("files", file));
+    files.forEach((file) => form.append("files", file));
     form.append("plant_id", selectedPlant);
     if (selectedLine) form.append("line_id", selectedLine);
     form.append("granularity", granularity);
@@ -595,7 +644,7 @@ export default function MonitoringPage() {
         { method: "POST", body: form },
       );
       setMessage(`Snapshot đã lưu: ${result.rows_merged} dòng; đã phát hiện ${result.alerts_detected} cảnh báo.`);
-      setFiles(null);
+      setFiles([]);
       await refresh();
     } catch (cause) {
       setError((cause as Error).message);
@@ -775,6 +824,17 @@ export default function MonitoringPage() {
         <section style={{ ...styles.panel, maxWidth: 480, margin: "8vh auto" }}>
           <Link href="/" style={{ color: "#2259bd" }}>← Về trang phân tích</Link>
           <h1>Intelligent Monitoring</h1>
+          {passwordUpgradeToken ? (
+            <>
+              <p>Mật khẩu cũ chưa đạt tối thiểu 12 ký tự. Hãy đặt mật khẩu mới để tiếp tục đăng nhập.</p>
+              <form onSubmit={upgradePassword} style={{ display: "grid", gap: 12 }}>
+                <label>Mật khẩu mới (tối thiểu 12 ký tự)<input required minLength={12} type="password" autoComplete="new-password" value={passwordUpgradeValue} onChange={(event) => setPasswordUpgradeValue(event.target.value)} style={styles.input} /></label>
+                <label>Nhập lại mật khẩu mới<input required minLength={12} type="password" autoComplete="new-password" value={passwordUpgradeConfirmation} onChange={(event) => setPasswordUpgradeConfirmation(event.target.value)} style={styles.input} /></label>
+                <button style={styles.button}>Cập nhật mật khẩu</button>
+              </form>
+            </>
+          ) : (
+            <>
           <p>Đăng nhập để quản lý nhà máy, ngưỡng và cảnh báo.</p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
             {(["login", "signup", "bootstrap", "forgot"] as const).map((mode) => (
@@ -793,7 +853,7 @@ export default function MonitoringPage() {
               <label>Tên hiển thị<input required value={displayName} onChange={(event) => setDisplayName(event.target.value)} style={styles.input} /></label>
             )}
             <label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} style={styles.input} /></label>
-            {authMode !== "forgot" && <label>Mật khẩu (tối thiểu 12 ký tự)<input required type="password" minLength={12} autoComplete={authMode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} style={styles.input} /></label>}
+            {authMode !== "forgot" && <label>{authMode === "login" ? "Mật khẩu" : "Mật khẩu (tối thiểu 12 ký tự)"}<input required type="password" minLength={authMode === "login" ? 1 : 12} autoComplete={authMode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} style={styles.input} /></label>}
             {authMode === "bootstrap" && (
               <label>Bootstrap token<input required type="password" value={bootstrapToken} onChange={(event) => setBootstrapToken(event.target.value)} style={styles.input} /></label>
             )}
@@ -802,7 +862,10 @@ export default function MonitoringPage() {
           <p style={{ color: "#68758a", fontSize: 13 }}>
             Đăng ký công khai chỉ cấp quyền viewer. Admin đầu tiên cần ALERT_BOOTSTRAP_TOKEN; đặt ALERT_AUTH_SECRET tối thiểu 32 ký tự ở backend.
           </p>
+            </>
+          )}
           {error && <p role="alert" style={{ color: "#b42318" }}>{error}</p>}
+          {message && <p role="status" style={{ color: "#126b3a" }}>{message}</p>}
         </section>
       </main>
     );
@@ -827,7 +890,7 @@ export default function MonitoringPage() {
           <button style={styles.button}>Lưu hồ sơ</button>
         </form>
         <form onSubmit={changePassword} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-          <label>Mật khẩu hiện tại<input required minLength={12} type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} style={styles.input} /></label>
+          <label>Mật khẩu hiện tại<input required minLength={1} type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} style={styles.input} /></label>
           <label>Mật khẩu mới<input required minLength={12} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} style={styles.input} /></label>
           <button style={styles.button}>Đổi mật khẩu và đăng xuất phiên</button>
         </form>
@@ -951,12 +1014,18 @@ export default function MonitoringPage() {
         <section style={{ ...styles.panel, marginBottom: 16 }}>
           <h2>Lưu snapshot và đánh giá ngay</h2>
           <form onSubmit={uploadSnapshot} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12, alignItems: "end" }}>
-            <label>File CSV/XLSX/PDF/Word<input required multiple type="file" accept=".csv,.xlsx,.xls,.pdf,.docx" onChange={(event) => setFiles(event.target.files)} style={styles.input} /></label>
+            <FileDropzone
+              accept=".csv,.xlsx,.xls,.pdf,.docx"
+              title="File CSV/XLSX/PDF/Word"
+              multiple
+              files={files}
+              onFilesSelected={setFiles}
+            />
             <label>Dây chuyền<select value={selectedLine} onChange={(event) => setSelectedLine(event.target.value)} style={styles.input}><option value="">Toàn nhà máy</option>{selectedPlantInfo?.lines.map((line) => <option key={line.id} value={line.id}>{line.name}</option>)}</select></label>
             <label>Kỳ tổng hợp<select value={granularity} onChange={(event) => setGranularity(event.target.value)} style={styles.input}><option value="day">Ngày</option><option value="week">Tuần</option><option value="month">Tháng</option></select></label>
             <label>Chạy lại mỗi<input type="number" min="1" max="52" value={interval} onChange={(event) => setInterval(event.target.value)} style={styles.input} /></label>
             <label>Nhịp<select value={unit} onChange={(event) => setUnit(event.target.value)} style={styles.input}><option value="hours">Giờ</option><option value="days">Ngày (mặc định)</option><option value="weeks">Tuần</option></select></label>
-            <button disabled={!selectedPlant || !files?.length} style={styles.button}>Lưu và chạy kiểm tra</button>
+            <button disabled={!selectedPlant || !files.length} style={styles.button}>Lưu và chạy kiểm tra</button>
           </form>
           <p style={{ color: "#68758a" }}>Snapshot được lưu trong PostgreSQL để lịch chạy tiếp tục hoạt động sau khi tiến trình khởi động lại. File mới kích hoạt đánh giá ngay.</p>
         </section>

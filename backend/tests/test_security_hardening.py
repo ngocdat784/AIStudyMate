@@ -13,6 +13,7 @@ from app.database.base import Base
 from app.models.api_rate_limit import ApiRateLimitBucket
 from app.routes.hardware import _parse_hardware_content
 from app.services.api_rate_limit import rate_limit_dependency
+from app.services.monitoring_auth import ensure_auth_configured
 
 
 class SecurityHardeningTests(unittest.TestCase):
@@ -110,6 +111,15 @@ class SecurityHardeningTests(unittest.TestCase):
         settings.SECURITY_RATE_LIMITS_ENABLED = True
 
         validate_security_settings()
+
+    def test_auth_secret_is_not_generated_automatically_outside_development(self):
+        settings.APP_ENV = "test"
+        settings.ALERT_AUTH_SECRET = None
+
+        with self.assertRaises(HTTPException) as raised:
+            ensure_auth_configured()
+
+        self.assertEqual(raised.exception.status_code, 503)
 
     def test_parser_rejects_too_many_csv_columns(self):
         with patch("app.routes.hardware.MAX_HARDWARE_COLUMNS", 2):

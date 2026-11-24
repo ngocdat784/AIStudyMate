@@ -2949,6 +2949,30 @@ button {
   margin-top: 20px;
 }
 
+.comparison-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+  color: #666;
+  font-size: 12px;
+}
+
+.comparison-pagination button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #d5d8de;
+  border-radius: 8px;
+  background: #fff;
+  color: #243248;
+}
+
+.comparison-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .comparison-chart-metric {
   min-width: 0;
   padding: 16px;
@@ -5783,5 +5807,181 @@ body {
 
   .quality-pareto-row > small {
     grid-column: auto;
+  }
+}
+.file-dropzone {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 84px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px dashed #aebdd1;
+  border-radius: 10px;
+  background: #f8faff;
+  color: #34445a;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.file-dropzone:hover,
+.file-dropzone.is-dragging {
+  border-color: #2259bd;
+  background: #eef4ff;
+}
+
+.file-dropzone.is-dragging {
+  box-shadow: 0 0 0 3px #2259bd1f;
+}
+
+.file-dropzone.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.file-dropzone:focus-within {
+  outline: 3px solid #4678c824;
+  outline-offset: 2px;
+}
+
+.file-dropzone-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.file-dropzone-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  color: #66758a;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.file-dropzone-copy strong {
+  overflow-wrap: anywhere;
+  color: #24354d;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.file-dropzone-selected {
+  overflow-wrap: anywhere;
+  color: #2259bd;
+}
+
+.file-dropzone-home {
+  min-height: 150px;
+  justify-content: center;
+  border-color: #aebdd1;
+  border-radius: 13px;
+  background: var(--surface-subtle, #f8faff);
+}
+
+.file-dropzone-home:hover,
+.file-dropzone-home.is-dragging {
+  background: #f0f5ff;
+}
+
+.file-dropzone-home .upload-plus {
+  flex: 0 0 40px;
+}
+
+.file-dropzone-home > div:last-child {
+  min-width: 0;
+}
+
+.file-dropzone-home strong {
+  display: block;
+  color: #24354d;
+  font-size: 14px;
+}
+
+.file-dropzone-home span {
+  display: block;
+  margin-top: 5px;
+  color: #66758a;
+  font-size: 12px;
+}
+
+.production-upload .file-dropzone {
+  max-width: 100%;
+}
+
+.integration-panel .file-dropzone {
+  display: flex;
+}
+
+.root-cause-upload-grid .file-dropzone {
+  min-height: 100%;
+  align-self: stretch;
+}
+
+@media (max-width: 640px) {
+  .file-dropzone {
+    padding: 12px;
+  }
+}
+.model-comparison-card .comparison-controls {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.comparison-model-options {
+  display: grid;
+  max-height: 240px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px 14px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #deddd8;
+}
+
+.comparison-model-options legend {
+  padding: 0 6px;
+  color: #777;
+  font-size: 11px;
+}
+
+.comparison-model-options label {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 8px;
+  color: #34445a;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.comparison-model-options input {
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+}
+
+.comparison-bar-row > strong {
+  white-space: normal;
+}
+
+.comparison-row-difference {
+  display: block;
+  color: #66758a;
+  font-size: 9px;
+  font-weight: 400;
+}
+
+@media (max-width: 760px) {
+  .model-comparison-card .comparison-controls {
+    grid-template-columns: 1fr;
   }
 }

@@ -26,6 +26,40 @@ _ADDITIONAL_ALIASES: dict[str, tuple[str, ...]] = {
     "Line": ("line", "line_id", "line_name", "work_center", "chuyền", "day_chuyen"),
     "Shift": ("shift", "shift_id", "ca", "ca_lam_viec"),
     "Machine": ("machine", "machine_id", "machine_name", "máy", "ma_may"),
+    "Machine Status": (
+        "machine_status",
+        "equipment_status",
+        "machine_state",
+        "operating_status",
+        "status",
+        "state",
+        "trạng thái máy",
+    ),
+    "Downtime Type": (
+        "downtime_type",
+        "downtime_reason",
+        "stop_reason",
+        "failure_type",
+        "fault_code",
+        "reason",
+        "lý do dừng máy",
+    ),
+    "Downtime Planned": (
+        "downtime_planned",
+        "planned_downtime",
+        "is_planned_downtime",
+        "planned_stop",
+    ),
+    "Maintenance Action": (
+        "maintenance_action",
+        "maintenance_activity",
+        "maintenance_type",
+    ),
+    "Maintenance Outcome": (
+        "maintenance_outcome",
+        "maintenance_result",
+        "repair_result",
+    ),
     "Operator": (
         "operator",
         "operator_id",
@@ -49,6 +83,80 @@ _ADDITIONAL_ALIASES: dict[str, tuple[str, ...]] = {
         "working_condition",
     ),
     "Material": ("material", "material_id", "material_code", "nguyên liệu", "nguyen_lieu"),
+    "Material Type": (
+        "material_type",
+        "material_category",
+        "material_class",
+        "material_group",
+    ),
+    "Material Lot": (
+        "material_lot",
+        "material_lot_id",
+        "material_lot_code",
+        "raw_material_lot",
+        "lot_number",
+    ),
+    "Material Unit": (
+        "material_unit",
+        "material_uom",
+        "consumption_unit",
+        "material_unit_of_measure",
+        "uom",
+    ),
+    "Material Currency": (
+        "material_currency",
+        "currency",
+        "currency_code",
+    ),
+    "Material Stock": (
+        "material_stock",
+        "material_stock_quantity",
+        "material_on_hand",
+        "inventory_quantity",
+        "on_hand_quantity",
+        "available_material",
+    ),
+    "Planned Consumption": (
+        "planned_consumption",
+        "planned_material_consumption",
+        "standard_consumption",
+        "planned_material_qty",
+        "material_plan",
+    ),
+    "Actual Consumption": (
+        "actual_consumption",
+        "actual_material_consumption",
+        "material_consumption",
+        "consumed_quantity",
+        "material_used",
+        "issued_quantity",
+    ),
+    "Material Unit Cost": (
+        "material_unit_cost",
+        "material_price_per_unit",
+        "unit_price",
+        "price_per_unit",
+        "cost_per_unit",
+    ),
+    "Material Cost": (
+        "material_cost",
+        "total_material_cost",
+        "actual_material_cost",
+        "material_cost_amount",
+    ),
+    "Material Loss": (
+        "material_loss",
+        "material_loss_quantity",
+        "material_waste",
+        "waste_quantity",
+        "waste_material_qty",
+    ),
+    "Scrap Material": (
+        "scrap_material",
+        "scrap_material_quantity",
+        "material_scrap",
+        "material_scrap_qty",
+    ),
     "Order": ("order", "order_id", "work_order", "production_order"),
     "Defect": ("defect", "defect_description", "defect_name", "mô tả lỗi"),
     "Planned Production": (
@@ -214,6 +322,43 @@ _DURATION_TO_MINUTES = {
     "minutes": 1.0,
     "hours": 60.0,
 }
+_MATERIAL_UNIT_FACTORS: dict[str, tuple[str, float]] = {
+    "g": ("g", 1.0),
+    "gram": ("g", 1.0),
+    "grams": ("g", 1.0),
+    "mg": ("g", 0.001),
+    "milligram": ("g", 0.001),
+    "milligrams": ("g", 0.001),
+    "kg": ("g", 1000.0),
+    "kilogram": ("g", 1000.0),
+    "kilograms": ("g", 1000.0),
+    "t": ("g", 1_000_000.0),
+    "tonne": ("g", 1_000_000.0),
+    "tonnes": ("g", 1_000_000.0),
+    "metric ton": ("g", 1_000_000.0),
+    "lb": ("g", 453.59237),
+    "lbs": ("g", 453.59237),
+    "pound": ("g", 453.59237),
+    "oz": ("g", 28.349523125),
+    "ounce": ("g", 28.349523125),
+    "ml": ("mL", 1.0),
+    "milliliter": ("mL", 1.0),
+    "millilitre": ("mL", 1.0),
+    "l": ("mL", 1000.0),
+    "liter": ("mL", 1000.0),
+    "litre": ("mL", 1000.0),
+    "m3": ("mL", 1_000_000.0),
+    "m³": ("mL", 1_000_000.0),
+    "pc": ("piece", 1.0),
+    "pcs": ("piece", 1.0),
+    "piece": ("piece", 1.0),
+    "pieces": ("piece", 1.0),
+    "ea": ("piece", 1.0),
+    "each": ("piece", 1.0),
+    "unit": ("piece", 1.0),
+    "units": ("piece", 1.0),
+    "count": ("piece", 1.0),
+}
 _CANONICAL_TARGETS = {
     re.sub(r"[\W]+", "_", target.casefold(), flags=re.UNICODE).strip("_"): target
     for target in _CANONICAL_ALIASES
@@ -239,11 +384,55 @@ class ManufacturingRecord(BaseModel):
     line: str | None = None
     shift: str | None = None
     machine: str | None = None
+    machine_status: str | None = None
+    downtime_type: str | None = None
+    downtime_planned: bool | None = None
+    maintenance_action: str | None = None
+    maintenance_outcome: str | None = None
     operator: str | None = None
     process: str | None = None
     method: str | None = None
     environment: str | None = None
     material: str | None = None
+    material_type: str | None = None
+    material_lot: str | None = None
+    material_unit: str | None = None
+    material_currency: str | None = None
+    material_stock_quantity: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+    )
+    planned_consumption: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+    )
+    actual_consumption: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+    )
+    material_unit_cost: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+    )
+    material_cost: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+    )
+    material_loss_quantity: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+    )
+    scrap_material_quantity: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+    )
     batch: str | None = None
     defect: str | None = None
     defect_type: str | None = None
@@ -460,6 +649,18 @@ def _parse_timestamp(value: Any, source_timezone: ZoneInfo) -> datetime:
     return timestamp.tz_convert("UTC").to_pydatetime()
 
 
+def _normalize_material_unit(value: Any) -> tuple[str | None, float]:
+    if _is_missing(value):
+        return None, 1.0
+    original = str(value).strip().casefold()
+    if not original:
+        return None, 1.0
+    normalized_key = re.sub(r"\s+", " ", original)
+    if normalized_key in _MATERIAL_UNIT_FACTORS:
+        return _MATERIAL_UNIT_FACTORS[normalized_key]
+    return normalized_key, 1.0
+
+
 def normalize_manufacturing_dataframe(
     dataframe: pd.DataFrame,
     *,
@@ -500,7 +701,7 @@ def normalize_manufacturing_dataframe(
     }
     missing_values = {
         target: 0
-        for target in target_to_source.values()
+        for target in target_to_source
         if not target.startswith("attributes.")
     }
     invalid_values: dict[str, int] = {}
@@ -537,9 +738,14 @@ def normalize_manufacturing_dataframe(
             )
             if production_value is None or production_issue is not None:
                 invalid_rows += 1
-                invalid_values["Production"] = (
-                    invalid_values.get("Production", 0) + 1
-                )
+                if production_value is None and production_issue is None:
+                    missing_values["Production"] = (
+                        missing_values.get("Production", 0) + 1
+                    )
+                else:
+                    invalid_values["Production"] = (
+                        invalid_values.get("Production", 0) + 1
+                    )
                 if require_production:
                     rejected_rows += 1
                     if len(warnings) < 20:
@@ -551,6 +757,15 @@ def normalize_manufacturing_dataframe(
                 row_issues = 1
             else:
                 values["production"] = float(production_value)
+
+        material_unit_source = target_to_source.get("Material Unit")
+        material_unit_factor = 1.0
+        if material_unit_source is not None and not _is_missing(
+            row[material_unit_source]
+        ):
+            values["material_unit"], material_unit_factor = (
+                _normalize_material_unit(row[material_unit_source])
+            )
 
         for target, field_name in (
             ("Defects", "defects"),
@@ -571,6 +786,13 @@ def normalize_manufacturing_dataframe(
             ("Lower Spec Limit", "lower_spec_limit"),
             ("Upper Spec Limit", "upper_spec_limit"),
             ("Process Sequence", "process_sequence"),
+            ("Planned Consumption", "planned_consumption"),
+            ("Actual Consumption", "actual_consumption"),
+            ("Material Unit Cost", "material_unit_cost"),
+            ("Material Cost", "material_cost"),
+            ("Material Loss", "material_loss_quantity"),
+            ("Scrap Material", "scrap_material_quantity"),
+            ("Material Stock", "material_stock_quantity"),
         ):
             source = target_to_source.get(target)
             if source is None or _is_missing(row[source]):
@@ -613,6 +835,13 @@ def normalize_manufacturing_dataframe(
                 "First Pass Passed",
                 "Reworked Units",
                 "Scrapped Units",
+                "Planned Consumption",
+                "Actual Consumption",
+                "Material Unit Cost",
+                "Material Cost",
+                "Material Loss",
+                "Scrap Material",
+                "Material Stock",
             } and number < 0:
                 values[field_name] = None
                 row_issues += 1
@@ -621,6 +850,17 @@ def normalize_manufacturing_dataframe(
             values[field_name] = (
                 float(number) * downtime_factor
                 if target == "Downtime"
+                else float(number) * material_unit_factor
+                if target
+                in {
+                    "Planned Consumption",
+                    "Actual Consumption",
+                    "Material Loss",
+                    "Scrap Material",
+                    "Material Stock",
+                }
+                else float(number) / material_unit_factor
+                if target == "Material Unit Cost"
                 else float(number) * _TIME_TO_SECONDS[cycle_time_unit]
                 if target in {"Cycle Time", "Standard Cycle Time"}
                 else float(number) * _DURATION_TO_MINUTES[duration_unit]
@@ -676,11 +916,19 @@ def normalize_manufacturing_dataframe(
             "Line": "line",
             "Shift": "shift",
             "Machine": "machine",
+            "Machine Status": "machine_status",
+            "Downtime Type": "downtime_type",
+            "Downtime Planned": "downtime_planned",
             "Operator": "operator",
             "Process": "process",
             "Method": "method",
             "Environment": "environment",
             "Material": "material",
+            "Material Type": "material_type",
+            "Material Lot": "material_lot",
+            "Material Unit": "material_unit",
+            "Material Currency": "material_currency",
+            "Material Stock": "material_stock_quantity",
             "Batch": "batch",
             "Defect": "defect",
             "Defect Type": "defect_type",
@@ -704,6 +952,14 @@ def normalize_manufacturing_dataframe(
             "Measurement Value": "measurement_value",
             "Lower Spec Limit": "lower_spec_limit",
             "Upper Spec Limit": "upper_spec_limit",
+            "Maintenance Action": "maintenance_action",
+            "Maintenance Outcome": "maintenance_outcome",
+            "Planned Consumption": "planned_consumption",
+            "Actual Consumption": "actual_consumption",
+            "Material Unit Cost": "material_unit_cost",
+            "Material Cost": "material_cost",
+            "Material Loss": "material_loss_quantity",
+            "Scrap Material": "scrap_material_quantity",
         }
         for target, field_name in canonical_field_names.items():
             source = target_to_source.get(target)
@@ -718,6 +974,25 @@ def normalize_manufacturing_dataframe(
                 else None
             )
 
+        planned_source = target_to_source.get("Downtime Planned")
+        if planned_source is not None:
+            raw_planned = row[planned_source]
+            if _is_missing(raw_planned):
+                values["downtime_planned"] = None
+            else:
+                normalized_planned = str(raw_planned).strip().casefold()
+                if normalized_planned in {"true", "1", "yes", "y", "planned", "có"}:
+                    values["downtime_planned"] = True
+                elif normalized_planned in {
+                    "false", "0", "no", "n", "unplanned", "không",
+                }:
+                    values["downtime_planned"] = False
+                else:
+                    values["downtime_planned"] = None
+                    row_issues += 1
+                    invalid_values["Downtime Planned"] = (
+                        invalid_values.get("Downtime Planned", 0) + 1
+                    )
         for target, source in target_to_source.items():
             if target.startswith("attributes.") and not _is_missing(row[source]):
                 attributes[target.removeprefix("attributes.")] = _json_safe(

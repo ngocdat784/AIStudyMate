@@ -1,13 +1,17 @@
 import base64
 import hashlib
 import hmac
+import logging
 import secrets
 import smtplib
 import ssl
+import threading
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 
+import bcrypt
 from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -29,6 +33,9 @@ TOKEN_TTL_SECONDS = 60 * 60 * 12
 PASSWORD_RESET_TTL_SECONDS = 60 * 30
 LOGIN_FAILURE_LIMIT = 5
 LOGIN_LOCK_SECONDS = 15 * 60
+_auth_secret_lock = threading.Lock()
+logger = logging.getLogger(__name__)
+bearer_auth = HTTPBearer(auto_error=False)
 
 
 def _b64(value: bytes) -> str:
@@ -46,6 +53,20 @@ def _secret() -> bytes:
 
 
 def ensure_auth_configured() -> None:
+    secret = settings.ALERT_AUTH_SECRET
+    if secret and len(secret) >= 32:
+        return
+    if settings.APP_ENV.strip().lower() == "development":
+        with _auth_secret_lock:
+            current_secret = settings.ALERT_AUTH_SECRET
+            if not current_secret or len(current_secret) < 32:
+                settings.ALERT_AUTH_SECRET = secrets.token_urlsafe(48)
+                logger.warning(
+                    "Generated a temporary development auth secret because "
+                    "ALERT_AUTH_SECRET is missing or invalid; configure a stable "
+                    "secret to keep rate-limit buckets stable across restarts."
+                )
+        return
     _secret()
 
 
@@ -58,6 +79,15 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, encoded: str) -> bool:
+    if encoded.startswith(("$2a$", "$2b$", "$2y$")):
+        try:
+            return bcrypt.checkpw(
+                password.encode("utf-8"),
+                encoded.encode("ascii"),
+            )
+        except (TypeError, ValueError):
+            return False
+
     try:
         algorithm, salt_text, expected_text = encoded.split("$", 2)
         if algorithm != "scrypt":
@@ -72,6 +102,10 @@ def verify_password(password: str, encoded: str) -> bool:
         password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32
     )
     return hmac.compare_digest(actual, expected)
+
+
+def password_hash_needs_upgrade(encoded: str) -> bool:
+    return not encoded.startswith("scrypt$")
 
 
 def _token_digest(token: str) -> str:
@@ -167,15 +201,15 @@ def _get_session_user(db: Session, token: str) -> tuple[AuthSession, AlertUser]:
 
 
 def get_current_user(
-    authorization: str | None = Header(default=None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_auth),
     db: Session = Depends(get_db),
 ) -> AlertUser:
-    if not authorization or not authorization.startswith("Bearer "):
+    if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Yêu cầu đăng nhập.",
         )
-    _, user = _get_session_user(db, authorization[7:])
+    _, user = _get_session_user(db, credentials.credentials)
     return user
 
 

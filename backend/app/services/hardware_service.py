@@ -1539,14 +1539,23 @@ def calculate_hardware_kpis(
 
 def compare_hardware_models(
     dataframe: pd.DataFrame,
-    model_a: str,
-    model_b: str,
+    model_a: str | list[str],
+    model_b: str | None = None,
 ) -> dict[str, Any]:
-    if not model_a.strip() or not model_b.strip():
-        raise ValueError("Vui lòng chọn đủ hai model để so sánh.")
-
-    if model_a == model_b:
-        raise ValueError("Hai model được chọn phải khác nhau.")
+    if isinstance(model_a, str):
+        selected_models = [model_a]
+        if model_b is not None:
+            selected_models.append(model_b)
+    else:
+        if model_b is not None:
+            raise ValueError("Không thể kết hợp danh sách model với model_b.")
+        selected_models = model_a
+    if len(selected_models) < 2:
+        raise ValueError("Vui lòng chọn ít nhất hai model để so sánh.")
+    if any(not isinstance(model, str) or not model.strip() for model in selected_models):
+        raise ValueError("Tên model không được để trống.")
+    if len(set(selected_models)) != len(selected_models):
+        raise ValueError("Các model được chọn phải khác nhau.")
 
     cleaned_dataframe = clean_dataframe(dataframe)
     model_column = find_column(cleaned_dataframe, "model")
@@ -1554,74 +1563,164 @@ def compare_hardware_models(
         raise ValueError("Không tìm thấy cột model trong dữ liệu.")
 
     model_values = cleaned_dataframe[model_column].astype("string")
-    model_reports: dict[str, dict[str, Any]] = {}
+    available_models = {
+        str(value)
+        for value in model_values.dropna().unique()
+        if str(value).strip() and str(value) != "Không xác định"
+    }
+    if len(selected_models) > len(available_models):
+        raise ValueError(
+            "Số model được chọn vượt quá số model có trong file phân tích."
+        )
+    unavailable_models = [
+        model for model in selected_models if model not in available_models
+    ]
+    if unavailable_models:
+        raise ValueError(
+            "Không tìm thấy model trong dữ liệu: "
+            + ", ".join(unavailable_models[:5])
+            + ("…" if len(unavailable_models) > 5 else "")
+        )
 
-    for label, model_name in (("model_a", model_a), ("model_b", model_b)):
-        model_dataframe = cleaned_dataframe.loc[
-            model_values.eq(model_name).fillna(False)
-        ].copy()
-        if model_dataframe.empty:
-            raise ValueError(
-                f"Không tìm thấy model '{model_name}' trong dữ liệu."
-            )
+    production_column = find_column(cleaned_dataframe, "production")
+    if production_column is None:
+        raise ValueError(
+            f"Model '{selected_models[0]}' không có đủ dữ liệu hợp lệ "
+            "để tính KPI: Không tìm thấy cột sản lượng."
+        )
 
-        try:
-            kpis = calculate_hardware_kpis(model_dataframe)
-        except ValueError as error:
+    defect_column = find_column(cleaned_dataframe, "defects")
+    downtime_column = find_column(cleaned_dataframe, "downtime")
+    production_raw = _to_numeric(cleaned_dataframe[production_column])
+    defects_raw = (
+        _to_numeric(cleaned_dataframe[defect_column])
+        if defect_column
+        else pd.Series(0.0, index=cleaned_dataframe.index)
+    )
+    downtime_raw = (
+        _to_numeric(cleaned_dataframe[downtime_column])
+        if downtime_column
+        else pd.Series(0.0, index=cleaned_dataframe.index)
+    )
+
+    valid_rows = production_raw.notna() & production_raw.ge(0)
+    if defect_column:
+        valid_rows &= defects_raw.notna() & defects_raw.ge(0)
+    if downtime_column:
+        valid_rows &= downtime_raw.notna() & downtime_raw.ge(0)
+
+    metric_rows = pd.DataFrame(
+        {
+            "model": model_values,
+            "production": production_raw,
+            "defects": defects_raw,
+            "downtime": downtime_raw,
+        }
+    )
+    rows_by_model = metric_rows.groupby(
+        "model",
+        sort=False,
+        dropna=True,
+    ).size()
+    metrics_by_model = (
+        metric_rows.loc[valid_rows]
+        .groupby("model", sort=False, dropna=True)
+        .agg(
+            production=("production", "sum"),
+            defects=("defects", "sum"),
+            downtime=("downtime", "sum"),
+            rows_used_for_kpi=("production", "size"),
+        )
+    )
+
+    model_reports: list[dict[str, Any]] = []
+    for model_name in selected_models:
+        if model_name not in metrics_by_model.index:
             raise ValueError(
                 f"Model '{model_name}' không có đủ dữ liệu hợp lệ để tính KPI: "
-                f"{error}"
-            ) from error
+                "Không còn bản ghi hợp lệ để tính KPI."
+            )
 
-        production = kpis["total_production"]
-        defects = kpis["total_defects"]
-        model_reports[label] = {
+        metrics = metrics_by_model.loc[model_name]
+        production = float(metrics["production"])
+        defects = float(metrics["defects"])
+        model_reports.append({
             "name": model_name,
-            "production": production,
-            "defects": defects,
+            "production": round(production, 2),
+            "defects": round(defects, 2),
             "defect_rate": (
-                kpis["defect_rate"]
+                round(defects / production * 100, 2)
                 if production > 0
                 else None
             ),
-            "downtime": kpis["total_downtime"],
-            "rows_used_for_kpi": kpis["data_processing"]["rows_used_for_kpi"],
+            "downtime": round(float(metrics["downtime"]), 2),
+            "rows_used_for_kpi": int(metrics["rows_used_for_kpi"]),
             "invalid_rows_excluded": (
-                kpis["data_processing"]["invalid_metric_rows_excluded"]
+                int(rows_by_model.loc[model_name])
+                - int(metrics["rows_used_for_kpi"])
+            ),
+        })
+
+    metrics = ("production", "defects", "downtime")
+    def compare_pair(
+        baseline: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> dict[str, Any]:
+        rate_a = baseline["defect_rate"]
+        rate_b = candidate["defect_rate"]
+        rate_is_available = rate_a is not None and rate_b is not None
+        differences: dict[str, float | None] = {
+            metric: round(candidate[metric] - baseline[metric], 2)
+            for metric in metrics
+        }
+        differences["defect_rate_percentage_points"] = (
+            round(rate_b - rate_a, 2) if rate_is_available else None
+        )
+        return {
+            "model_a": baseline["name"],
+            "model_b": candidate["name"],
+            "differences": differences,
+            "rate_comparison_status": (
+                "available" if rate_is_available else "insufficient_production"
             ),
         }
 
-    metrics = ("production", "defects", "downtime")
-    differences: dict[str, float | None] = {
-        metric: round(
-            model_reports["model_b"][metric]
-            - model_reports["model_a"][metric],
-            2,
-        )
-        for metric in metrics
-    }
-    rate_a = model_reports["model_a"]["defect_rate"]
-    rate_b = model_reports["model_b"]["defect_rate"]
-    rate_is_available = rate_a is not None and rate_b is not None
-    differences["defect_rate_percentage_points"] = (
-        round(rate_b - rate_a, 2)
-        if rate_is_available
-        else None
+    comparisons = [
+        compare_pair(model_reports[0], candidate)
+        for candidate in model_reports[1:]
+    ]
+    first_comparison = comparisons[0]
+    rates = [
+        model["defect_rate"]
+        for model in model_reports
+    ]
+    all_rates_available = all(rate is not None for rate in rates)
+    highest_rate = max(rates) if all_rates_available else None
+    highest_rate_models = (
+        [
+            model["name"]
+            for model in model_reports
+            if model["defect_rate"] == highest_rate
+        ]
+        if highest_rate is not None
+        else []
     )
 
-    higher_defect_rate_model = None
-    if rate_is_available and rate_a != rate_b:
-        higher_defect_rate_model = (
-            model_a if rate_a > rate_b else model_b
-        )
-
     return {
-        "models": model_reports,
-        "differences": differences,
+        "models": {
+            "model_a": model_reports[0],
+            "model_b": model_reports[1],
+        },
+        "model_results": model_reports,
+        "selected_models": [model["name"] for model in model_reports],
+        "comparisons": comparisons,
+        "differences": first_comparison["differences"],
         "rate_comparison_status": (
-            "available" if rate_is_available else "insufficient_production"
+            "available" if all_rates_available else "insufficient_production"
         ),
-        "higher_defect_rate_model": higher_defect_rate_model,
+        "higher_defect_rate_model": (
+            highest_rate_models[0] if len(highest_rate_models) == 1 else None
+        ),
     }
 
 

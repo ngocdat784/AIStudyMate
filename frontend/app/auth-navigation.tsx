@@ -89,6 +89,21 @@ export default function AuthNavigation() {
         <Link href="/production" onClick={handleProtectedNavigation}>
           Phân tích sản xuất
         </Link>
+        <Link href="/machine-intelligence" onClick={handleProtectedNavigation}>
+          Phân tích thiết bị
+        </Link>
+        <Link href="/material-intelligence" onClick={handleProtectedNavigation}>
+          Phân tích vật liệu
+        </Link>
+        <Link href="/predictive-intelligence" onClick={handleProtectedNavigation}>
+          Dự báo sản xuất
+        </Link>
+        <Link href="/enterprise-intelligence" onClick={handleProtectedNavigation}>
+          Điều hành doanh nghiệp
+        </Link>
+        <Link href="/system-integration" onClick={handleProtectedNavigation}>
+          Nghiệm thu tích hợp
+        </Link>
         <Link href="/quality" onClick={handleProtectedNavigation}>
           Phân tích chất lượng
         </Link>

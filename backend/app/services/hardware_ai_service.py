@@ -20,6 +20,7 @@ from app.services.gemini_retry import call_gemini_with_retry
 
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
+COMPARISON_GEMINI_TIMEOUT_MS = 15_000
 logger = logging.getLogger(__name__)
 
 
@@ -299,6 +300,7 @@ def _gemini_response_schema(
 # ============================================================
 
 _client = None
+_comparison_client = None
 
 
 def get_client() -> Any:
@@ -316,6 +318,24 @@ def get_client() -> Any:
         _client = genai.Client(api_key=api_key)
 
     return _client
+
+
+def get_comparison_client() -> Any:
+    global _comparison_client
+
+    if _comparison_client is None:
+        api_key = settings.GEMINI_API_KEY
+        if not api_key:
+            raise ValueError(
+                "GEMINI_API_KEY chưa được cấu hình. "
+                "Vui lòng kiểm tra biến môi trường hoặc file .env."
+            )
+        _comparison_client = genai.Client(
+            api_key=api_key,
+            http_options={"timeout": COMPARISON_GEMINI_TIMEOUT_MS},
+        )
+
+    return _comparison_client
 
 
 # ============================================================
@@ -1705,31 +1725,126 @@ def analyze_hardware_deep(
     return result
 
 
+def _comparison_ai_input(comparison: dict[str, Any]) -> dict[str, Any]:
+    model_results = comparison.get("model_results")
+    if not isinstance(model_results, list) or not model_results:
+        return comparison
+
+    def model_summary(model: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: model.get(key)
+            for key in (
+                "name",
+                "production",
+                "defects",
+                "defect_rate",
+                "downtime",
+                "rows_used_for_kpi",
+                "invalid_rows_excluded",
+            )
+        }
+
+    summaries = [
+        model_summary(model)
+        for model in model_results
+        if isinstance(model, dict)
+    ]
+    if not summaries:
+        return comparison
+    if len(summaries) <= 12:
+        return {
+            "selected_model_count": len(summaries),
+            "baseline_model": summaries[0],
+            "models": summaries,
+            "comparisons_vs_baseline": comparison.get("comparisons", []),
+            "higher_defect_rate_model": comparison.get(
+                "higher_defect_rate_model"
+            ),
+            "rate_comparison_status": comparison.get(
+                "rate_comparison_status"
+            ),
+        }
+
+    representatives: dict[str, dict[str, Any]] = {}
+
+    def include(model: dict[str, Any]) -> None:
+        name = model.get("name")
+        if isinstance(name, str):
+            representatives[name] = model
+
+    include(summaries[0])
+    metric_extremes: dict[str, dict[str, dict[str, Any]]] = {}
+    for metric in ("defect_rate", "production", "downtime"):
+        candidates = [
+            model
+            for model in summaries
+            if isinstance(model.get(metric), (int, float))
+            and not isinstance(model.get(metric), bool)
+            and math.isfinite(model[metric])
+        ]
+        if not candidates:
+            continue
+
+        lowest = min(candidates, key=lambda model: model[metric])
+        highest = max(candidates, key=lambda model: model[metric])
+        metric_extremes[metric] = {
+            "lowest": {
+                "model": lowest["name"],
+                "value": lowest[metric],
+            },
+            "highest": {
+                "model": highest["name"],
+                "value": highest[metric],
+            },
+        }
+        include(lowest)
+        include(highest)
+
+    return {
+        "selected_model_count": len(summaries),
+        "baseline_model": summaries[0],
+        "representative_models": list(representatives.values()),
+        "metric_extremes": metric_extremes,
+        "higher_defect_rate_model": comparison.get(
+            "higher_defect_rate_model"
+        ),
+        "rate_comparison_status": comparison.get(
+            "rate_comparison_status"
+        ),
+        "interpretation_note": (
+            "Python đã tính kết quả cho toàn bộ model. Danh sách đại diện "
+            "chỉ dùng để diễn giải; không suy rộng nhận xét ngoài các số "
+            "liệu được cung cấp."
+        ),
+    }
+
+
 def analyze_hardware_comparison(
     comparison: dict[str, Any],
 ) -> dict[str, Any]:
+    analysis_input = _comparison_ai_input(comparison)
     prompt = (
         "Bạn là chuyên gia phân tích chất lượng sản xuất phần cứng. "
         "Hãy nhận xét ngắn gọn bằng tiếng Việt và đề xuất các điểm cần "
-        "kiểm tra dựa duy nhất trên dữ liệu so sánh đã được Python tính "
-        "toán dưới đây. Các số liệu và chênh lệch là cố định; không tính "
-        "lại, không sửa, không thêm số liệu và không suy đoán nguyên nhân "
-        "chắc chắn. Nếu tỷ lệ lỗi không thể so sánh do production bằng 0, "
-        "hãy nêu rõ giới hạn đó và không kết luận model nào có tỷ lệ lỗi "
-        "cao hơn.\n\n"
-        f"{json.dumps(comparison, ensure_ascii=False)}"
+        "kiểm tra dựa duy nhất trên dữ liệu tóm tắt do Python tính dưới "
+        "đây. Không tính lại, không sửa, không thêm số liệu và không suy "
+        "đoán nguyên nhân chắc chắn. Nếu đầu vào chỉ gồm model đại diện, "
+        "không suy rộng nhận xét cho các model không được liệt kê. Nếu tỷ "
+        "lệ lỗi không thể so sánh do production bằng 0, hãy nêu rõ giới "
+        "hạn đó và không kết luận model nào có tỷ lệ lỗi cao hơn.\n\n"
+        f"{json.dumps(analysis_input, ensure_ascii=False)}"
     )
     audit = AIAuditContext(
         analysis_type="hardware_comparison",
         model_name=GEMINI_MODEL,
-        prompt_version="hardware_comparison_v1",
-        input_data=comparison,
+        prompt_version="hardware_comparison_v2",
+        input_data=analysis_input,
         prompt_text=prompt,
     )
 
     try:
         response = call_gemini_with_retry(
-            lambda: get_client().models.generate_content(
+            lambda: get_comparison_client().models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt,
                 config={
@@ -1739,7 +1854,8 @@ def analyze_hardware_comparison(
                     ),
                     "temperature": 0.2,
                 },
-            )
+            ),
+            max_attempts=1,
         )
     except Exception as exc:
         audit.fail(exc)

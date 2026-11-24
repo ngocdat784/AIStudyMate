@@ -1,6 +1,10 @@
+import hashlib
 import unittest
 from datetime import datetime, timedelta, timezone
 from typing import Iterator
+from unittest.mock import patch
+
+import bcrypt
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -11,7 +15,8 @@ from app.config import settings
 from app.database.base import Base
 from app.database.connection import get_db
 from app.main import app
-from app.models.monitoring import AlertUser, AuthSession
+from app.models.monitoring import AlertUser, AuthSession, PasswordResetToken
+from app.services.monitoring_auth import hash_password, verify_password
 
 
 class AuthenticationSessionTests(unittest.TestCase):
@@ -55,6 +60,36 @@ class AuthenticationSessionTests(unittest.TestCase):
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 
+    def test_current_user_uses_swagger_bearer_authentication(self):
+        openapi = self.client.get("/openapi.json").json()
+
+        self.assertIn("HTTPBearer", openapi["components"]["securitySchemes"])
+        self.assertEqual(
+            openapi["components"]["securitySchemes"]["HTTPBearer"]["scheme"],
+            "bearer",
+        )
+        self.assertIn(
+            {"HTTPBearer": []},
+            openapi["paths"]["/api/monitoring/auth/me"]["get"]["security"],
+        )
+
+        unauthorized = self.client.get("/api/monitoring/auth/me")
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(unauthorized.json()["detail"], "Yêu cầu đăng nhập.")
+
+        wrong_scheme = self.client.get(
+            "/api/monitoring/auth/me",
+            headers={"Authorization": "Basic not-a-bearer-token"},
+        )
+        self.assertEqual(wrong_scheme.status_code, 401)
+        self.assertEqual(wrong_scheme.json()["detail"], "Yêu cầu đăng nhập.")
+
+        authenticated = self.client.get(
+            "/api/monitoring/auth/me",
+            headers=self.headers,
+        )
+        self.assertEqual(authenticated.status_code, 200)
+
     def test_sessions_can_be_listed_revoked_and_logged_out(self):
         second_login = self.client.post(
             "/api/monitoring/auth/login",
@@ -88,6 +123,155 @@ class AuthenticationSessionTests(unittest.TestCase):
             self.client.get("/api/monitoring/auth/me", headers=self.headers).status_code,
             401,
         )
+
+    def test_existing_admin_login_generates_token_without_valid_dev_secret(self):
+        for configured_secret in (None, "short"):
+            with (
+                self.subTest(configured_secret=configured_secret),
+                patch.object(settings, "APP_ENV", "development"),
+                patch.object(settings, "ALERT_AUTH_SECRET", configured_secret),
+            ):
+                login = self.client.post(
+                    "/api/monitoring/auth/login",
+                    json={
+                        "email": "session-admin@example.test",
+                        "password": "secure-test-password",
+                    },
+                )
+                self.assertEqual(login.status_code, 200, login.text)
+                self.assertEqual(login.json()["user"]["role"], "admin")
+                self.assertGreaterEqual(len(settings.ALERT_AUTH_SECRET or ""), 32)
+
+                current_user = self.client.get(
+                    "/api/monitoring/auth/me",
+                    headers={
+                        "Authorization": f"Bearer {login.json()['access_token']}"
+                    },
+                )
+                self.assertEqual(current_user.status_code, 200, current_user.text)
+                self.assertEqual(current_user.json()["role"], "admin")
+
+    def test_bcrypt_password_is_rehashed_after_successful_login(self):
+        legacy_hash = bcrypt.hashpw(
+            b"secure-test-password",
+            bcrypt.gensalt(),
+        ).decode("ascii")
+        with Session(self.engine) as session:
+            user = session.get(AlertUser, self.user_id)
+            self.assertIsNotNone(user)
+            user.password_hash = legacy_hash
+            session.commit()
+
+        rejected = self.client.post(
+            "/api/monitoring/auth/login",
+            json={
+                "email": "session-admin@example.test",
+                "password": "incorrect-secure-password",
+            },
+        )
+        self.assertEqual(rejected.status_code, 401)
+        with Session(self.engine) as session:
+            user = session.get(AlertUser, self.user_id)
+            self.assertEqual(user.password_hash, legacy_hash)
+
+        accepted = self.client.post(
+            "/api/monitoring/auth/login",
+            json={
+                "email": "session-admin@example.test",
+                "password": "secure-test-password",
+            },
+        )
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        with Session(self.engine) as session:
+            user = session.get(AlertUser, self.user_id)
+            self.assertTrue(user.password_hash.startswith("scrypt$"))
+            self.assertTrue(
+                verify_password(
+                    "secure-test-password",
+                    user.password_hash,
+                )
+            )
+
+    def test_short_existing_password_requires_one_time_upgrade_before_login(self):
+        short_password = "short-pass"
+        with Session(self.engine) as session:
+            user = session.get(AlertUser, self.user_id)
+            self.assertIsNotNone(user)
+            user.password_hash = hash_password(short_password)
+            session.commit()
+
+        rejected = self.client.post(
+            "/api/monitoring/auth/login",
+            json={
+                "email": "session-admin@example.test",
+                "password": "wrong-short",
+            },
+        )
+        self.assertEqual(rejected.status_code, 401)
+
+        required = self.client.post(
+            "/api/monitoring/auth/login",
+            json={
+                "email": "session-admin@example.test",
+                "password": short_password,
+            },
+        )
+        self.assertEqual(required.status_code, 200, required.text)
+        payload = required.json()
+        self.assertTrue(payload["password_change_required"])
+        self.assertNotIn("access_token", payload)
+        self.assertEqual(
+            self.client.get("/api/monitoring/auth/me", headers=self.headers).status_code,
+            401,
+        )
+
+        too_short = self.client.post(
+            "/api/monitoring/auth/reset-password",
+            json={"token": payload["password_reset_token"], "new_password": "still-short"},
+        )
+        self.assertEqual(too_short.status_code, 422)
+
+        upgraded = self.client.post(
+            "/api/monitoring/auth/reset-password",
+            json={
+                "token": payload["password_reset_token"],
+                "new_password": "new-secure-password",
+            },
+        )
+        self.assertEqual(upgraded.status_code, 200, upgraded.text)
+        replayed = self.client.post(
+            "/api/monitoring/auth/reset-password",
+            json={
+                "token": payload["password_reset_token"],
+                "new_password": "another-secure-password",
+            },
+        )
+        self.assertEqual(replayed.status_code, 400)
+
+        login = self.client.post(
+            "/api/monitoring/auth/login",
+            json={
+                "email": "session-admin@example.test",
+                "password": "new-secure-password",
+            },
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        self.assertIn("access_token", login.json())
+        self.assertNotIn("password_change_required", login.json())
+
+        with Session(self.engine) as session:
+            reset_token = session.scalar(
+                select(PasswordResetToken).where(
+                    PasswordResetToken.user_id == self.user_id
+                )
+            )
+            self.assertIsNotNone(reset_token)
+            self.assertIsNotNone(reset_token.used_at)
+            self.assertEqual(
+                reset_token.token_hash,
+                hashlib.sha256(payload["password_reset_token"].encode("ascii")).hexdigest(),
+            )
+            self.assertNotEqual(reset_token.token_hash, payload["password_reset_token"])
 
     def test_login_lockout_revokes_existing_sessions(self):
         for attempt in range(5):

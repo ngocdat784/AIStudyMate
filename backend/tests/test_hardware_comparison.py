@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from threading import Event
 import unittest
 from unittest.mock import Mock, patch
 
@@ -92,6 +94,62 @@ class HardwareComparisonTests(unittest.TestCase):
             -6.46,
         )
 
+    def test_comparison_supports_any_selected_number_of_available_models(self):
+        dataframe = pd.DataFrame(
+            {
+                "Model": ["A", "B", "C", "A", "B", "C"],
+                "Production": [100, 200, 300, 10, 20, 30],
+                "Defects": [1, 4, 9, 0, 0, 0],
+                "Downtime": [2, 5, 8, 1, 1, 1],
+            }
+        )
+
+        result = compare_hardware_models(dataframe, ["A", "B", "C"])
+
+        self.assertEqual(result["selected_models"], ["A", "B", "C"])
+        self.assertEqual(
+            [model["name"] for model in result["model_results"]],
+            ["A", "B", "C"],
+        )
+        self.assertEqual(len(result["comparisons"]), 2)
+        self.assertEqual(result["comparisons"][0]["model_a"], "A")
+        self.assertEqual(result["comparisons"][0]["model_b"], "B")
+        self.assertEqual(result["comparisons"][1]["model_b"], "C")
+        self.assertEqual(
+            result["comparisons"][1]["differences"]["production"],
+            220,
+        )
+        self.assertEqual(result["higher_defect_rate_model"], "C")
+
+    def test_comparison_scales_to_many_selected_models(self):
+        model_count = 500
+        selected_models = [
+            f"Model {model_number:03d}"
+            for model_number in range(model_count)
+        ]
+        dataframe = pd.DataFrame(
+            {
+                "Model": selected_models,
+                "Production": [model_number + 1 for model_number in range(model_count)],
+                "Defects": [model_number % 7 for model_number in range(model_count)],
+                "Downtime": [model_number % 11 for model_number in range(model_count)],
+            }
+        )
+
+        result = compare_hardware_models(dataframe, selected_models)
+
+        self.assertEqual(len(result["model_results"]), model_count)
+        self.assertEqual(len(result["comparisons"]), model_count - 1)
+        self.assertEqual(result["model_results"][-1]["name"], "Model 499")
+        self.assertEqual(result["model_results"][-1]["production"], 500)
+
+    def test_multi_model_comparison_rejects_duplicate_and_unknown_names(self):
+        with self.assertRaisesRegex(ValueError, "phải khác nhau"):
+            compare_hardware_models(self.dataframe, ["A", "A"])
+
+        with self.assertRaisesRegex(ValueError, "Không tìm thấy model"):
+            compare_hardware_models(self.dataframe, ["A", "missing"])
+
     def test_rejects_model_with_no_valid_metric_rows(self):
         dataframe = pd.DataFrame(
             {
@@ -120,11 +178,15 @@ class HardwareComparisonTests(unittest.TestCase):
                 "AIAuditContext",
                 return_value=audit,
             ) as audit_context,
-            patch.object(hardware_ai_service, "get_client", return_value=client),
+            patch.object(
+                hardware_ai_service,
+                "get_comparison_client",
+                return_value=client,
+            ),
             patch.object(
                 hardware_ai_service,
                 "call_gemini_with_retry",
-                side_effect=lambda operation: operation(),
+                side_effect=lambda operation, **_kwargs: operation(),
             ),
         ):
             result = hardware_ai_service.analyze_hardware_comparison(
@@ -143,7 +205,7 @@ class HardwareComparisonTests(unittest.TestCase):
         )
         self.assertEqual(
             audit_kwargs["prompt_version"],
-            "hardware_comparison_v1",
+            "hardware_comparison_v2",
         )
         self.assertEqual(audit_kwargs["input_data"], comparison)
         self.assertEqual(
@@ -153,6 +215,36 @@ class HardwareComparisonTests(unittest.TestCase):
         audit.set_raw_response.assert_called_once_with(raw_response)
         audit.succeed.assert_called_once_with(result)
         self.assertEqual(result["summary"], "So sánh hoàn tất.")
+
+    def test_comparison_ai_input_stays_bounded_for_many_models(self):
+        model_results = [
+            {
+                "name": f"Model {model_number:03d}",
+                "production": model_number + 1,
+                "defects": model_number % 7,
+                "defect_rate": model_number / 10,
+                "downtime": model_number % 11,
+                "rows_used_for_kpi": 1,
+                "invalid_rows_excluded": 0,
+            }
+            for model_number in range(500)
+        ]
+
+        ai_input = hardware_ai_service._comparison_ai_input(
+            {
+                "model_results": model_results,
+                "comparisons": [],
+                "rate_comparison_status": "available",
+            }
+        )
+
+        self.assertEqual(ai_input["selected_model_count"], 500)
+        self.assertLessEqual(len(ai_input["representative_models"]), 7)
+        self.assertIn("metric_extremes", ai_input)
+        self.assertLess(
+            len(str(ai_input)),
+            5_000,
+        )
 
     def test_comparison_ai_error_is_audited_and_reraised(self):
         error = RuntimeError("Gemini unavailable")
@@ -339,6 +431,122 @@ class HardwareComparisonTests(unittest.TestCase):
         self.assertEqual(payload["ai_status"], "available")
         analyze_ai.assert_called_once()
 
+    def test_slow_ai_analysis_does_not_block_other_api_requests(self):
+        client = TestClient(app)
+        csv_content = (
+            b"Model,Production,Defects,Downtime\n"
+            b"A,100,1,4\n"
+            b"B,100,3,8\n"
+        )
+        ai_started = Event()
+        release_ai = Event()
+
+        def slow_ai_analysis(_comparison):
+            ai_started.set()
+            release_ai.wait(timeout=10)
+            return {
+                "summary": "Đã so sánh các model được chọn.",
+                "investigation_points": [],
+            }
+
+        with patch(
+            "app.routes.hardware.analyze_hardware_comparison",
+            side_effect=slow_ai_analysis,
+        ):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                comparison_future = executor.submit(
+                    client.post,
+                    "/api/hardware/compare",
+                    data={"model_a": "A", "model_b": "B"},
+                    files={
+                        "file": ("models.csv", csv_content, "text/csv")
+                    },
+                )
+                self.assertTrue(ai_started.wait(timeout=5))
+
+                health_future = executor.submit(
+                    client.get,
+                    "/openapi.json",
+                )
+                timed_out = False
+                try:
+                    health_response = health_future.result(timeout=2)
+                except TimeoutError:
+                    timed_out = True
+                    health_response = None
+                finally:
+                    release_ai.set()
+
+                comparison_response = comparison_future.result(timeout=5)
+
+        self.assertFalse(
+            timed_out,
+            "A slow Gemini request blocked the API event loop.",
+        )
+        self.assertEqual(health_response.status_code, 200)
+        self.assertEqual(comparison_response.status_code, 200)
+
+    def test_slow_metric_calculation_does_not_block_other_api_requests(self):
+        client = TestClient(app)
+        csv_content = (
+            b"Model,Production,Defects,Downtime\n"
+            b"A,100,1,4\n"
+            b"B,100,3,8\n"
+        )
+        calculation_started = Event()
+        release_calculation = Event()
+
+        def slow_calculation(dataframe, selected_models):
+            calculation_started.set()
+            release_calculation.wait(timeout=10)
+            return compare_hardware_models(dataframe, selected_models)
+
+        with (
+            patch(
+                "app.routes.hardware.compare_hardware_models",
+                side_effect=slow_calculation,
+            ),
+            patch(
+                "app.routes.hardware.analyze_hardware_comparison",
+                return_value={
+                    "summary": "Đã so sánh các model được chọn.",
+                    "investigation_points": [],
+                },
+            ),
+        ):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                comparison_future = executor.submit(
+                    client.post,
+                    "/api/hardware/compare",
+                    data={"model_a": "A", "model_b": "B"},
+                    files={
+                        "file": ("models.csv", csv_content, "text/csv")
+                    },
+                )
+                self.assertTrue(calculation_started.wait(timeout=5))
+
+                health_future = executor.submit(
+                    client.get,
+                    "/openapi.json",
+                )
+                timed_out = False
+                try:
+                    health_response = health_future.result(timeout=2)
+                except TimeoutError:
+                    timed_out = True
+                    health_response = None
+                finally:
+                    release_calculation.set()
+
+                comparison_response = comparison_future.result(timeout=5)
+
+        self.assertFalse(
+            timed_out,
+            "Slow KPI calculation blocked the API event loop.",
+        )
+        self.assertEqual(health_response.status_code, 200)
+        self.assertEqual(comparison_response.status_code, 200)
+
     def test_compare_endpoint_reports_identical_models_as_client_error(self):
         client = TestClient(app)
         csv_content = b"Model,Production,Defects,Downtime\nA,100,1,4\n"
@@ -351,6 +559,82 @@ class HardwareComparisonTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertIn("phải khác nhau", response.json()["detail"])
+
+    def test_compare_endpoint_accepts_a_selected_list_of_models(self):
+        client = TestClient(app)
+        csv_content = (
+            b"Model,Production,Defects,Downtime\n"
+            b"A,100,1,4\n"
+            b"B,100,4,8\n"
+            b"C,200,2,6\n"
+        )
+
+        with patch(
+            "app.routes.hardware.analyze_hardware_comparison",
+            return_value={
+                "summary": "Đã so sánh các model được chọn.",
+                "investigation_points": ["Đối chiếu quy trình."],
+            },
+        ):
+            response = client.post(
+                "/api/hardware/compare",
+                data={"model_names": ["A", "B", "C"]},
+                files={"file": ("models.csv", csv_content, "text/csv")},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["selected_models"], ["A", "B", "C"])
+        self.assertEqual(len(payload["model_results"]), 3)
+        self.assertEqual(len(payload["comparisons"]), 2)
+        self.assertEqual(payload["models"]["model_a"]["name"], "A")
+        self.assertEqual(payload["models"]["model_b"]["name"], "B")
+
+    def test_compare_endpoint_handles_many_selected_models(self):
+        client = TestClient(app)
+        model_count = 200
+        selected_models = [
+            f"Model {model_number:03d}"
+            for model_number in range(model_count)
+        ]
+        csv_content = (
+            "Model,Production,Defects,Downtime\n"
+            + "".join(
+                f"{model},100,{index % 5},{index % 9}\n"
+                for index, model in enumerate(selected_models)
+            )
+        ).encode()
+
+        with patch(
+            "app.routes.hardware.analyze_hardware_comparison",
+            return_value={
+                "summary": "Đã so sánh các model được chọn.",
+                "investigation_points": [],
+            },
+        ):
+            response = client.post(
+                "/api/hardware/compare",
+                data={"model_names": selected_models},
+                files={"file": ("models.csv", csv_content, "text/csv")},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(len(payload["model_results"]), model_count)
+        self.assertEqual(len(payload["comparisons"]), model_count - 1)
+
+    def test_multi_model_endpoint_rejects_models_missing_from_uploaded_file(self):
+        client = TestClient(app)
+        csv_content = b"Model,Production,Defects,Downtime\nA,100,1,4\nB,100,3,8\n"
+
+        response = client.post(
+            "/api/hardware/compare",
+            data={"model_names": ["A", "B", "C"]},
+            files={"file": ("models.csv", csv_content, "text/csv")},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("vượt quá số model", response.json()["detail"])
 
     def test_ai_failure_does_not_hide_python_comparison_results(self):
         client = TestClient(app)
