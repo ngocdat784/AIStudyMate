@@ -52,7 +52,14 @@ def _parse_mapping(value: str | None) -> dict[str, str] | None:
     return mapping
 
 
-def _parse_dimensions(value: str) -> list[str]:
+_DEFAULT_GROUP_DIMENSIONS = ["product", "process", "line", "shift"]
+
+
+def _parse_dimensions(value: str | None) -> list[str]:
+    if value is None or not value.strip():
+        return list(_DEFAULT_GROUP_DIMENSIONS)
+    if value.strip().casefold() == "null":
+        return list(_DEFAULT_GROUP_DIMENSIONS)
     try:
         dimensions = json.loads(value)
     except json.JSONDecodeError as error:

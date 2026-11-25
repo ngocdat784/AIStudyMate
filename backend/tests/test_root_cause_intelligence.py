@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Iterator
 
 import pandas as pd
@@ -181,6 +182,31 @@ class RootCauseAnalyticsTests(unittest.TestCase):
         )
         self.assertIsNone(quality_only["production"])
 
+    def test_defect_rate_ranking_excludes_tautological_defect_components(self):
+        fixture_path = (
+            Path(__file__).resolve().parents[1]
+            / "test_data"
+            / "root_cause_intelligence_test.csv"
+        )
+        frame = pd.read_csv(fixture_path)
+
+        result = analyze_root_cause_intelligence(
+            frame,
+            problem_statement="Why is defect rate elevated?",
+            include_ai=False,
+        )
+
+        factors = [
+            candidate["factor"]
+            for candidate in result["root_cause_candidates"]
+            if candidate["factor_level"] is None
+        ]
+        assert "defective_units" not in factors
+        assert "defects" not in factors
+        assert "inspected_quantity" not in factors
+        assert "defect_rate" not in factors
+        assert result["root_cause_candidates"][0]["support_score"] == 98
+
     def test_missing_quality_denominator_does_not_create_ranked_root_cause(self):
         result = analyze_root_cause_intelligence(
             pd.DataFrame(
@@ -316,6 +342,40 @@ class RootCauseAnalysisAPITests(unittest.TestCase):
                 history.algorithm_version,
                 "root-cause-intelligence-v2.3",
             )
+
+    def test_upload_accepts_blank_group_dimensions_and_default_fixture(self):
+        fixture_path = (
+            Path(__file__).resolve().parents[1]
+            / "test_data"
+            / "root_cause_intelligence_test.csv"
+        )
+        content = fixture_path.read_bytes()
+
+        response = self.client.post(
+            "/api/root-cause/analyze",
+            data={
+                "problem_statement": "Why is defect rate elevated?",
+                "include_ai": "false",
+                "group_dimensions": "",
+            },
+            files={
+                "file": (
+                    fixture_path.name,
+                    content,
+                    "text/csv",
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        body = response.json()
+        self.assertEqual(body["schema_version"], "2.3")
+        self.assertEqual(
+            body["data_scope"]["group_dimensions"],
+            ["product", "process", "line", "shift"],
+        )
+        self.assertTrue(body["root_cause_candidates"])
+        self.assertTrue(body["analysis_history_id"])
 
     def test_upload_requires_authentication(self):
         unauthenticated = TestClient(app)

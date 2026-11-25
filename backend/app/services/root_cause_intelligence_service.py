@@ -100,6 +100,19 @@ _VARIABLE_ALIASES = {
     "scrapped_units": "scrapped_units",
     "measurement_value": "measurement_value",
 }
+_OUTCOME_COMPONENT_VARIABLES = {
+    "defect_rate": {
+        "inspected_quantity",
+        "defective_units",
+        "defects",
+        "defect_rate",
+    },
+    "actual_production": {
+        "actual_production",
+        "planned_production",
+        "production_achievement_rate",
+    },
+}
 
 
 class EvidenceStatement(BaseModel):
@@ -700,6 +713,11 @@ def _rank_hypotheses(
             if result["left_variable"] == outcome_metric
             else result["left_variable"]
         )
+        if predictor in _OUTCOME_COMPONENT_VARIABLES.get(
+            outcome_metric,
+            set(),
+        ):
+            continue
         coefficient = (
             result["spearman"]
             if abs(result["spearman"]) >= abs(result["pearson"])
