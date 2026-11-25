@@ -3,9 +3,8 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
-from sqlalchemy.engine import make_url
 
-from app.config import settings
+from app.config import get_database_url, settings
 from app.database.base import Base
 
 # Import model để đăng ký metadata với SQLAlchemy.
@@ -50,7 +49,7 @@ if not settings.DATABASE_URL:
         "DATABASE_URL chưa được cấu hình trong file .env"
     )
 
-database_url = make_url(settings.DATABASE_URL)
+database_url = get_database_url()
 
 # Alembic sử dụng URL từ .env, không lấy mật khẩu từ alembic.ini.
 config.set_main_option(
@@ -62,10 +61,8 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = settings.DATABASE_URL
-
     context.configure(
-        url=url,
+        url=database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},

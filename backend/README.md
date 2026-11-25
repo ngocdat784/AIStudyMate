@@ -736,6 +736,37 @@ bootstrap token after initial administrator creation. The frontend container
 is built with `BACKEND_INTERNAL_URL=http://backend:8000`; when deploying
 outside Compose, provide a reachable backend URL at frontend image build time.
 
+### Sharing the local database with the Docker backend (Windows development)
+
+The local backend and the default Compose stack can point at different
+PostgreSQL databases. To run a Docker backend against the same local database
+and source tree, use the separate `compose.shared-backend.yaml` service:
+
+```powershell
+docker compose -f compose.yaml -f compose.shared-backend.yaml up -d --no-deps backend
+docker compose -f compose.yaml -f compose.shared-backend.yaml ps
+```
+
+Run the local Alembic migration first. This override reuses the Compose
+backend's existing image and network, binds `backend/` into the container with
+Uvicorn reload, and routes its `DATABASE_URL` to `host.docker.internal`; the
+local backend continues to use `localhost`. Ensure the repository `.env` and
+`backend/.env` `DATABASE_URL` values identify the same database. The shared
+Docker backend listens on `127.0.0.1:8001` for local checks. `--no-deps`
+avoids starting or replacing the separate Compose PostgreSQL container; its
+volume is left untouched, and no data copy is performed.
+
+Keep the local backend and frontend running, then start the Quick Tunnel with:
+
+```powershell
+cloudflared tunnel --url http://127.0.0.1:3000
+```
+
+Only the local frontend is exposed by that command. Its `/api` rewrite reaches
+the local backend on port `8000`; the Docker backend on port `8001` shares the
+same database and source. Stop it with
+`docker compose -f compose.yaml -f compose.shared-backend.yaml stop backend`.
+
 GitHub Actions runs backend tests and Alembic offline SQL validation, frontend
 lint/build, and container builds on pull requests. A successful push to `main`
 publishes immutable SHA-tagged images to GitHub Container Registry (and

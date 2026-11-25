@@ -1,0 +1,22 @@
+services:
+  migrate:
+    environment:
+      DATABASE_HOST_OVERRIDE: host.docker.internal
+    volumes:
+      - type: bind
+        source: ./backend
+        target: /app
+
+  backend:
+    environment:
+      DATABASE_HOST_OVERRIDE: host.docker.internal
+    volumes:
+      - type: bind
+        source: ./backend
+        target: /app
+    ports:
+      - "127.0.0.1:8001:8000"
+    command:
+      - sh
+      - -c
+      - exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

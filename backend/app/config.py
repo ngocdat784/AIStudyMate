@@ -3,7 +3,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
 
 
@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     # PostgreSQL
     DATABASE_URL: str | None = None
+    DATABASE_HOST_OVERRIDE: str | None = None
     ALERT_AUTH_SECRET: str | None = None
     ALERT_BOOTSTRAP_TOKEN: str | None = None
     ALERT_SCHEDULER_ENABLED: bool = True
@@ -85,13 +86,23 @@ class Settings(BaseSettings):
     )
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=("../.env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
 
 settings = Settings()
+
+
+def get_database_url() -> URL:
+    if not settings.DATABASE_URL:
+        raise RuntimeError("DATABASE_URL chưa được cấu hình trong file .env")
+
+    database_url = make_url(settings.DATABASE_URL)
+    if settings.DATABASE_HOST_OVERRIDE:
+        database_url = database_url.set(host=settings.DATABASE_HOST_OVERRIDE)
+    return database_url
 
 
 def validate_security_settings() -> None:

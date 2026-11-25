@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.config import settings, validate_security_settings
+from app.config import get_database_url, settings, validate_security_settings
 from app.database.base import Base
 from app.models.api_rate_limit import ApiRateLimitBucket
 from app.routes.hardware import _parse_hardware_content
@@ -23,6 +23,7 @@ class SecurityHardeningTests(unittest.TestCase):
             "APP_BASE_URL": settings.APP_BASE_URL,
             "CORS_ALLOWED_ORIGINS": settings.CORS_ALLOWED_ORIGINS,
             "DATABASE_URL": settings.DATABASE_URL,
+            "DATABASE_HOST_OVERRIDE": settings.DATABASE_HOST_OVERRIDE,
             "ALERT_AUTH_SECRET": settings.ALERT_AUTH_SECRET,
             "ALERT_BOOTSTRAP_TOKEN": settings.ALERT_BOOTSTRAP_TOKEN,
             "SECURITY_RATE_LIMITS_ENABLED": settings.SECURITY_RATE_LIMITS_ENABLED,
@@ -31,6 +32,19 @@ class SecurityHardeningTests(unittest.TestCase):
     def tearDown(self):
         for key, value in self.saved_settings.items():
             setattr(settings, key, value)
+
+    def test_database_host_override_preserves_the_rest_of_the_url(self):
+        settings.DATABASE_URL = (
+            "postgresql+psycopg://user:password@localhost:5432/hardwareai_db"
+        )
+        settings.DATABASE_HOST_OVERRIDE = "host.docker.internal"
+
+        database_url = get_database_url()
+
+        self.assertEqual(database_url.host, "host.docker.internal")
+        self.assertEqual(database_url.port, 5432)
+        self.assertEqual(database_url.database, "hardwareai_db")
+        self.assertEqual(database_url.username, "user")
 
     def test_rate_limit_is_atomic_and_does_not_store_client_ip(self):
         settings.ALERT_AUTH_SECRET = "test-rate-limit-secret-with-32-characters"

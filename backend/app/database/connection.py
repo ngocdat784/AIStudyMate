@@ -2,7 +2,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.config import settings
+from app.config import get_database_url, settings
 
 
 if not settings.DATABASE_URL:
@@ -10,11 +10,7 @@ if not settings.DATABASE_URL:
         "DATABASE_URL chưa được cấu hình trong file .env"
     )
 
-engine = create_engine(
-    settings.DATABASE_URL,
-    pool_pre_ping=True,
-    pool_recycle=1800,
-)
+engine = create_engine(get_database_url(), pool_pre_ping=True, pool_recycle=1800)
 
 SessionLocal = sessionmaker(
     bind=engine,
