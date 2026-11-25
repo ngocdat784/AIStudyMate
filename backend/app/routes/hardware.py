@@ -186,7 +186,24 @@ def _read_csv_robust(content: bytes) -> pd.DataFrame:
             ):
                 all_lines_wrapped = False
 
-        if has_nonempty_line and all_lines_wrapped:
+        has_quoted_delimited_fields = any(
+            first_line.count(delimiter) > 0
+            and len(
+                next(
+                    csv.reader(
+                        [first_line],
+                        delimiter=delimiter,
+                        quotechar='"',
+                    )
+                )
+            ) > 1
+            for delimiter in delimiters
+        )
+        if (
+            has_nonempty_line
+            and all_lines_wrapped
+            and not has_quoted_delimited_fields
+        ):
             text = "\n".join(
                 line.strip()[1:-1] if line.strip() else line
                 for line in io.StringIO(text)

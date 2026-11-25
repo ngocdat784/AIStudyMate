@@ -77,7 +77,7 @@ def _status_kind(status: str | None) -> str:
     return "other"
 
 
-def _is_failure(record: ManufacturingRecord) -> bool:
+def is_machine_failure(record: ManufacturingRecord) -> bool:
     if record.downtime_minutes is None or record.downtime_minutes <= 0:
         return False
 
@@ -367,7 +367,7 @@ def _performance_metrics(
         if valid_oee
         else None
     )
-    failure_records = [record for record in records if _is_failure(record)]
+    failure_records = [record for record in records if is_machine_failure(record)]
     failures = len(failure_records)
     unplanned_downtime = sum(
         record.downtime_minutes or 0

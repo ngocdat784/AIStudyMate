@@ -832,7 +832,10 @@ def _build_count_chart(
         scope=scope,
         reason=None,
     )
-    observations: list[tuple[ManufacturingRecord, float, float]] = []
+    samples: dict[
+        tuple[str, str],
+        dict[str, Any],
+    ] = {}
     for record in records:
         inspected = record.inspected_quantity
         if inspected is None or inspected <= 0:
@@ -847,8 +850,24 @@ def _build_count_chart(
             count = _defect_events(record)
             if count is None:
                 continue
-        observations.append((record, count, float(inspected)))
+        sample_id = record.subgroup_id or record.batch
+        sample_key = (
+            ("sample", sample_id)
+            if sample_id
+            else ("row", str(record.source_row))
+        )
+        sample = samples.setdefault(
+            sample_key,
+            {
+                "record": record,
+                "count": 0.0,
+                "inspected": 0.0,
+            },
+        )
+        sample["count"] += count
+        sample["inspected"] += float(inspected)
 
+    observations = list(samples.values())
     if len(observations) < 2:
         chart["reason"] = (
             "Requires at least two samples with inspected quantity and "
@@ -861,15 +880,18 @@ def _build_count_chart(
         chart["reason"] = "C chart requires a constant sample size; use U chart for varying sizes."
         return chart
 
-    total_count = sum(count for _, count, _ in observations)
-    total_inspected = sum(sample_size for _, _, sample_size in observations)
+    total_count = sum(sample["count"] for sample in observations)
+    total_inspected = sum(sample["inspected"] for sample in observations)
     center = (
         total_count / len(observations)
         if chart_type == "c"
         else total_count / total_inspected
     )
     points: list[dict[str, Any]] = []
-    for record, count, sample_size in observations:
+    for sample in observations:
+        record = sample["record"]
+        count = sample["count"]
+        sample_size = sample["inspected"]
         if chart_type == "p":
             value = count / sample_size
             sigma = math.sqrt(center * (1 - center) / sample_size)

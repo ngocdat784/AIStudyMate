@@ -104,6 +104,20 @@ class HardwareMultipleUploadTests(unittest.TestCase):
         self.assertEqual(dataframe.iloc[0]["Model"], "ProBook X1")
         self.assertEqual(dataframe.iloc[1]["Production"], "200")
 
+    def test_parser_preserves_quotes_around_delimited_csv_fields(self):
+        content = (
+            '\ufeff"Date";"Product";"Production"\n'
+            '"2026-10-01";"Laptop";"100"\n'
+            '"2026-10-02";"Desktop";"200"\n'
+        ).encode("utf-8")
+
+        dataframe = _read_csv_robust(content)
+
+        self.assertEqual(dataframe.columns.tolist(), ["Date", "Product", "Production"])
+        self.assertEqual(dataframe.shape, (2, 3))
+        self.assertEqual(dataframe.iloc[0]["Date"], "2026-10-01")
+        self.assertEqual(dataframe.iloc[1]["Production"], "200")
+
     def test_parser_rejects_more_than_the_configured_row_limit(self):
         content = b"Date,Production\n2026-10-01,10\n2026-10-02,20\n"
 

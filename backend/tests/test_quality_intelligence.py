@@ -188,6 +188,35 @@ def test_p_c_u_charts_and_iqr_detect_a_known_quality_spike():
     assert result["quality_anomalies"]
 
 
+def test_count_charts_aggregate_rows_within_each_subgroup():
+    frame = pd.DataFrame(
+        [
+            {
+                "Inspected": 50,
+                "Defective Units": defective,
+                "Defects": defective,
+                "Subgroup": f"SG{sample:03d}",
+            }
+            for sample in range(1, 21)
+            for defective in (1, 0)
+        ]
+    )
+
+    spc = analyze_quality_intelligence(frame, include_ai=False)["spc"]
+    p_chart = spc["charts"]["p"][0]
+    c_chart = spc["charts"]["c"][0]
+    u_chart = spc["charts"]["u"][0]
+
+    assert len(p_chart["points"]) == 20
+    assert p_chart["points"][0]["sample"] == "SG001"
+    assert p_chart["points"][0]["sample_size"] == 100
+    assert p_chart["points"][0]["value"] == 0.01
+    assert len(c_chart["points"]) == 20
+    assert c_chart["points"][0]["value"] == 1
+    assert len(u_chart["points"]) == 20
+    assert u_chart["points"][0]["value"] == 0.01
+
+
 def test_xbar_r_capability_requires_stable_subgroups_and_normality():
     generator = random.Random(0)
     frame = pd.DataFrame(

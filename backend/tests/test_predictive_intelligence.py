@@ -1,5 +1,6 @@
 import unittest
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Iterator
 
 import pandas as pd
@@ -130,6 +131,35 @@ def test_predictive_analysis_uses_chronological_statistical_backtests():
     assert scenarios["quality_improvement"]["status"] == "simulated"
 
 
+def test_predictive_failure_counts_only_confirmed_failures_with_downtime():
+    frame = _predictive_frame()
+    frame["Machine Status"] = "Running"
+    frame["Downtime Type"] = "Routine"
+    frame["Downtime Planned"] = False
+    frame["Downtime"] = 30
+    frame.loc[0, ["Machine Status", "Downtime Type"]] = [
+        "Fault",
+        "Sensor fault",
+    ]
+    frame.loc[1, "Downtime Type"] = "mechanical_failure"
+    frame.loc[2, "Downtime Type"] = "mechanical_failure"
+    frame.loc[2, "Downtime"] = 0
+    frame.loc[3, "Downtime Type"] = "unplanned_stop"
+
+    result = analyze_predictive_intelligence(frame)
+
+    daily = result["predictive_data_foundation"]["time_series"]
+    assert sum(row["machine_failure_count"] or 0 for row in daily) == 1
+    assert sum(row["unplanned_downtime_events"] or 0 for row in daily) == 39
+    assert result["machine_failure_assessment"]["failure_period_count"] == 1
+    assert (
+        result["machine_failure_assessment"]["by_machine"][0][
+            "failure_period_count"
+        ]
+        == 1
+    )
+
+
 def test_predictive_analysis_reports_insufficient_history_without_ml():
     result = analyze_predictive_intelligence(_predictive_frame(days=10))
 
@@ -242,3 +272,43 @@ class PredictiveIntelligenceAPITests(unittest.TestCase):
                 history.result_data["analysis_type"],
                 "predictive_intelligence",
             )
+
+    def test_api_analyzes_quoted_semicolon_predictive_fixture(self):
+        fixture_path = (
+            Path(__file__).resolve().parents[1]
+            / "test_data"
+            / "predictive_intelligence_test.csv"
+        )
+        content = fixture_path.read_bytes()
+
+        response = self.client.post(
+            "/api/predictive-intelligence/analyze",
+            data={
+                "horizon": "7",
+                "source_timezone": "UTC",
+                "downtime_unit": "minutes",
+                "production_unit": "unit",
+            },
+            files={
+                "file": (
+                    fixture_path.name,
+                    content,
+                    "text/csv",
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        body = response.json()
+        self.assertEqual(body["data_quality"]["quality_score"], 100)
+        self.assertEqual(body["data_quality"]["invalid_rows"], 0)
+        self.assertEqual(
+            body["predictive_data_foundation"]["timestamped_row_count"],
+            90,
+        )
+        self.assertEqual(
+            body["predictive_data_foundation"]["observed_period_count"],
+            45,
+        )
+        self.assertEqual(body["forecasts"]["production"]["status"], "forecasted")
+        self.assertEqual(len(body["forecasts"]["production"]["forecast"]), 7)

@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from app.services.machine_intelligence_service import is_machine_failure
 from app.services.manufacturing_data_foundation import (
     ManufacturingDataset,
     ManufacturingRecord,
@@ -21,30 +22,12 @@ _MIN_OBSERVED_PERIODS = 15
 _MIN_FEATURE_ROWS = 8
 _FEATURE_WINDOW = 7
 _FORECAST_METHODS = ("last_observation", "rolling_mean_7")
-_FAILURE_TOKENS = (
-    "failure",
-    "fault",
-    "breakdown",
-    "error",
-    "failed",
-    "hỏng",
-    "lỗi",
-)
 
 
 def _rounded(value: float | None) -> float | None:
     if value is None or not math.isfinite(value):
         return None
     return round(value, 4)
-
-
-def _failure_status(record: ManufacturingRecord) -> bool:
-    status = " ".join(
-        value.casefold()
-        for value in (record.machine_status, record.downtime_type)
-        if value
-    )
-    return any(token in status for token in _FAILURE_TOKENS)
 
 
 def _sum_if_present(values: list[float | None]) -> float | None:
@@ -192,7 +175,7 @@ def _daily_series(
             if record.machine_status or record.downtime_type
         ]
         failure_count = (
-            float(sum(_failure_status(record) for record in labeled_machine_rows))
+            float(sum(is_machine_failure(record) for record in labeled_machine_rows))
             if has_machine_state and labeled_machine_rows
             else None
         )
@@ -685,7 +668,7 @@ def _machine_failure_by_machine(
         period = record.timestamp.astimezone(source_timezone).date()
         observed[record.machine][period] = (
             observed[record.machine].get(period, False)
-            or _failure_status(record)
+            or is_machine_failure(record)
         )
 
     assessments = []
