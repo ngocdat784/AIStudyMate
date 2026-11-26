@@ -1938,13 +1938,35 @@ button {
 
 .data-quality-card {
   overflow: hidden;
+  border-color: color-mix(in srgb, var(--quality-accent) 42%, var(--line));
+  border-left: 5px solid var(--quality-accent);
+  background:
+    linear-gradient(
+      120deg,
+      color-mix(in srgb, var(--quality-accent) 8%, var(--surface)),
+      var(--surface) 72%
+    );
+  box-shadow: 0 12px 30px
+    color-mix(in srgb, var(--quality-accent) 12%, transparent);
+}
+
+.data-quality-card.quality-good {
+  --quality-accent: var(--color-success);
+}
+
+.data-quality-card.quality-review {
+  --quality-accent: var(--color-warning);
+}
+
+.data-quality-card.quality-poor {
+  --quality-accent: var(--color-danger);
 }
 
 .data-quality-main {
   display: flex;
   align-items: center;
-  gap: 28px;
-  margin-top: 28px;
+  gap: 24px;
+  margin-top: 20px;
 }
 
 .quality-score {
@@ -1962,22 +1984,31 @@ button {
 
 .quality-score-total {
   font-size: 18px;
-  opacity: 0.5;
+  color: var(--ink-muted);
+  font-weight: 650;
 }
 
 .quality-status {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
+  max-width: 560px;
+  padding: 14px 18px;
+  border: 1px solid
+    color-mix(in srgb, var(--quality-accent) 34%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--quality-accent) 8%, var(--surface));
 }
 
 .quality-status strong {
-  font-size: 18px;
+  color: var(--quality-accent);
+  font-size: 20px;
 }
 
 .quality-status span {
-  font-size: 13px;
-  opacity: 0.6;
+  color: var(--ink-muted);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .quality-stats {
@@ -1989,51 +2020,57 @@ button {
 
 .quality-stat {
   padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line);
   border-radius: 12px;
+  background: var(--surface-subtle);
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 .quality-stat span {
-  font-size: 12px;
-  opacity: 0.55;
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 650;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.045em;
 }
 
 .quality-stat strong {
-  font-size: 22px;
+  color: var(--ink);
+  font-size: 24px;
 }
 
 .quality-success {
   margin-top: 18px;
   padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, var(--line));
   border-radius: 12px;
   display: flex;
   flex-direction: column;
   gap: 5px;
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--color-success) 8%, var(--surface));
 }
 
 .quality-success strong {
-  font-size: 14px;
+  color: var(--color-success);
+  font-size: 16px;
 }
 
 .quality-success span {
-  font-size: 13px;
-  opacity: 0.6;
+  color: var(--ink-muted);
+  font-size: 14px;
 }
 
 .quality-issues {
   margin-top: 22px;
   padding-top: 22px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--line);
 }
 
 .quality-issues-title {
-  font-size: 13px;
+  color: var(--color-danger);
+  font-size: 14px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -2054,39 +2091,41 @@ button {
 }
 
 .quality-issue > span {
-  font-size: 11px;
-  opacity: 0.4;
+  color: var(--color-warning);
+  font-size: 13px;
+  font-weight: 700;
   min-width: 20px;
 }
 
 .quality-issue p {
   margin: 0;
-  font-size: 13px;
+  color: var(--ink-muted);
+  font-size: 14px;
   line-height: 1.5;
 }
 
 .quality-excellent .quality-score-number {
-  color: #4ade80;
+  color: var(--color-success);
 }
 
 .quality-good .quality-score-number {
-  color: #a3e635;
+  color: var(--color-success);
 }
 
 .quality-review .quality-score-number {
-  color: #facc15;
+  color: var(--color-warning);
 }
 
 .quality-poor .quality-score-number {
-  color: #f87171;
+  color: var(--color-danger);
 }
 
 .processing-summary {
   margin-top: 22px;
   padding: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--line);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.025);
+  background: color-mix(in srgb, var(--surface-subtle) 78%, var(--surface));
 }
 
 .processing-summary-heading {
@@ -2103,23 +2142,26 @@ button {
 }
 
 .processing-summary-heading strong {
+  color: var(--ink);
   font-size: 14px;
 }
 
 .processing-summary-heading > div > span,
 .quality-scoring-basis {
-  color: rgba(255, 255, 255, 0.58);
-  font-size: 12px;
+  color: var(--ink-muted);
+  font-size: 14px;
   line-height: 1.55;
 }
 
 .processing-kpi-count {
   flex: 0 0 auto;
   padding: 7px 10px;
-  border: 1px solid rgba(120, 210, 170, 0.2);
+  border: 1px solid color-mix(in srgb, var(--color-success) 32%, var(--line));
   border-radius: 999px;
-  color: #9de5c2;
-  font-size: 11px;
+  background: color-mix(in srgb, var(--color-success) 9%, var(--surface));
+  color: var(--color-success);
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .processing-stats {
@@ -2130,7 +2172,7 @@ button {
 }
 
 .processing-stats .quality-stat {
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface);
 }
 
 .processing-reasons {
@@ -2139,12 +2181,12 @@ button {
   gap: 9px;
   margin-top: 16px;
   padding-top: 15px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--line);
 }
 
 .processing-reasons > span {
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 11px;
+  color: var(--ink-muted);
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2158,16 +2200,16 @@ button {
 
 .processing-reason {
   padding: 6px 9px;
-  border: 1px solid rgba(255, 190, 70, 0.17);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 32%, var(--line));
   border-radius: 8px;
-  background: rgba(255, 190, 70, 0.06);
-  color: rgba(255, 255, 255, 0.78);
-  font-size: 11px;
+  background: color-mix(in srgb, var(--color-warning) 9%, var(--surface));
+  color: var(--color-warning);
+  font-size: 13px;
 }
 
 .processing-reasons small {
-  color: rgba(255, 255, 255, 0.48);
-  font-size: 11px;
+  color: var(--ink-muted);
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -2178,10 +2220,12 @@ button {
 .quality-optional-field-note {
   margin: 10px 0 0;
   padding: 12px 14px;
-  border-left: 2px solid rgba(120, 170, 255, 0.45);
-  background: rgba(120, 170, 255, 0.06);
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--blue) 28%, var(--line));
+  border-left: 3px solid var(--blue);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--blue) 7%, var(--surface));
+  color: var(--ink-muted);
+  font-size: 14px;
   line-height: 1.6;
 }
 
