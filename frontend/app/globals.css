@@ -278,7 +278,8 @@ button {
   width: min(30px, 70%);
   min-height: 4px;
   border-radius: 5px 5px 2px 2px;
-  background: linear-gradient(180deg, #4f82d4, #2259bd);
+  background: linear-gradient(180deg, var(--chart-primary), var(--chart-primary-strong));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--chart-primary) 35%, transparent);
 }
 
 .executive-trend-date {
@@ -1623,7 +1624,7 @@ button {
   align-items: stretch;
   gap: 28px;
   padding: 20px 20px 0;
-  border-bottom: 1px solid #d9d7d1;
+  border-bottom: 1px solid var(--chart-grid);
 }
 
 .chart-column {
@@ -1650,7 +1651,9 @@ button {
 .chart-bar {
   width: 100%;
   min-height: 8px;
-  background: #171717;
+  border-radius: 7px 7px 0 0;
+  background: linear-gradient(180deg, var(--chart-primary), var(--chart-primary-strong));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--chart-primary) 32%, transparent);
   transition: height 0.5s ease;
 }
 
@@ -2976,8 +2979,9 @@ button {
 .comparison-chart-metric {
   min-width: 0;
   padding: 16px;
-  border: 1px solid #e5e4df;
-  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--chart-grid);
+  border-radius: 12px;
+  background: var(--chart-surface);
 }
 
 .comparison-chart-title {
@@ -2989,7 +2993,7 @@ button {
 }
 
 .comparison-chart-title span {
-  color: #777;
+  color: var(--chart-label);
   text-align: right;
 }
 
@@ -3018,7 +3022,7 @@ button {
   height: 7px;
   overflow: hidden;
   border-radius: 99px;
-  background: #e9e8e3;
+  background: var(--chart-track);
 }
 
 .comparison-bar {
@@ -3028,11 +3032,11 @@ button {
 }
 
 .comparison-bar-a {
-  background: #7b8dff;
+  background: var(--chart-primary);
 }
 
 .comparison-bar-b {
-  background: #41a986;
+  background: var(--chart-secondary);
 }
 
 .comparison-ai {
@@ -3723,8 +3727,9 @@ button {
 .trend-chart {
   min-width: 0;
   padding: 15px;
-  border: 1px solid #e5e4df;
-  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--chart-grid);
+  border-radius: 12px;
+  background: var(--chart-surface);
 }
 
 .trend-chart h4,
@@ -3740,7 +3745,7 @@ button {
   gap: 8px;
   overflow-x: auto;
   padding-top: 22px;
-  border-bottom: 1px solid #deddd8;
+  border-bottom: 1px solid var(--chart-grid);
 }
 
 .trend-chart-column {
@@ -3751,12 +3756,12 @@ button {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  color: #777;
+  color: var(--chart-label);
   font-size: 9px;
 }
 
 .trend-chart-column strong {
-  color: #555;
+  color: var(--color-ink);
   font-size: 9px;
   font-weight: 600;
 }
@@ -3772,7 +3777,8 @@ button {
   height: 145px;
   align-items: flex-end;
   overflow: hidden;
-  background: #efeee9;
+  border-radius: 5px 5px 0 0;
+  background: var(--chart-track);
 }
 
 .trend-chart-bar {
@@ -3782,19 +3788,23 @@ button {
 }
 
 .trend-production-bar {
-  background: #7888ee;
+  background: linear-gradient(180deg, var(--chart-primary), var(--chart-primary-strong));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--chart-primary) 35%, transparent);
 }
 
 .trend-defects-bar {
-  background: #d77b68;
+  background: linear-gradient(180deg, var(--chart-alert), #be3455);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--chart-alert) 35%, transparent);
 }
 
 .trend-defect_rate-bar {
-  background: #d77b68;
+  background: linear-gradient(180deg, var(--chart-alert), #be3455);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--chart-alert) 35%, transparent);
 }
 
 .trend-downtime-bar {
-  background: #41a986;
+  background: linear-gradient(180deg, var(--chart-secondary), #078373);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--chart-secondary) 35%, transparent);
 }
 
 .trend-series-table-wrapper {
@@ -5349,14 +5359,15 @@ body {
   height: 12px;
   overflow: hidden;
   border-radius: 999px;
-  background: #edf0f5;
+  background: var(--chart-track);
 }
 
 .quality-pareto-track span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #dd8a32, #ba3f32);
+  background: linear-gradient(90deg, var(--chart-warning), var(--chart-alert));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--chart-alert) 35%, transparent);
 }
 
 .quality-period-list {
@@ -5385,7 +5396,7 @@ body {
   padding: 14px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
-  background: #fff;
+  background: var(--color-surface);
 }
 
 .quality-chart-heading,
@@ -5420,7 +5431,7 @@ body {
     to bottom,
     transparent 0,
     transparent 29px,
-    #e8edf4 30px
+    var(--chart-grid) 30px
   );
 }
 
@@ -5429,11 +5440,13 @@ body {
   min-width: 2px;
   max-width: 9px;
   border-radius: 3px 3px 0 0;
-  background: #3974c6;
+  background: var(--chart-primary);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--chart-primary) 30%, transparent);
 }
 
 .quality-chart-point-alert {
-  background: #bf3d32;
+  background: var(--chart-alert);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--chart-alert) 45%, transparent);
 }
 
 @media (max-width: 720px) {
@@ -6117,6 +6130,15 @@ body {
 :root {
   color-scheme: light;
   --font-sans: "Segoe UI", "Noto Sans", Arial, Helvetica, sans-serif;
+  --chart-primary: #3478f6;
+  --chart-primary-strong: #1d4ed8;
+  --chart-secondary: #0f9f8f;
+  --chart-warning: #f59e0b;
+  --chart-alert: #e5484d;
+  --chart-grid: #d7e0ec;
+  --chart-track: #e8eef6;
+  --chart-surface: #f8faff;
+  --chart-label: #526174;
 }
 
 html[data-theme="dark"] {
@@ -6141,6 +6163,15 @@ html[data-theme="dark"] {
   --color-warning: #f2bf69;
   --color-danger: #ff9186;
   --shadow-card: 0 10px 28px rgb(0 0 0 / 22%);
+  --chart-primary: #60a5fa;
+  --chart-primary-strong: #3b82f6;
+  --chart-secondary: #34d399;
+  --chart-warning: #fbbf24;
+  --chart-alert: #fb7185;
+  --chart-grid: #35465e;
+  --chart-track: #26364d;
+  --chart-surface: #18263a;
+  --chart-label: #c2cede;
 }
 
 body {
