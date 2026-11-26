@@ -77,6 +77,9 @@ from app.services.hardware_analysis_jobs import (
     serialize_hardware_analysis_job,
     update_hardware_analysis_job_stage,
 )
+from app.services.document_table_extractor import (
+    extract_document_tables_with_gemini,
+)
 
 
 router = APIRouter(
@@ -475,64 +478,93 @@ def _parse_hardware_content(
         if any(entry.flag_bits & 0x1 for entry in entries):
             raise ValueError("Không hỗ trợ tệp Office được mã hóa.")
 
-    if extension == ".csv":
-        dataframe = _read_csv_robust(content)
-        logger.info(
-            "Parsed hardware CSV: filename=%s rows=%d columns=%d",
-            Path(filename).name,
-            len(dataframe.index),
-            len(dataframe.columns),
-        )
-    elif extension == ".xlsx":
-        excel = pd.ExcelFile(
-            io.BytesIO(content),
-            engine="openpyxl",
-        )
-        frames = []
-        total_rows = 0
-        for sheet_name in excel.sheet_names:
-            sheet_dataframe = pd.read_excel(
-                excel,
-                sheet_name=sheet_name,
-                engine="openpyxl",
-                nrows=MAX_HARDWARE_ROWS + 1 - total_rows,
+    dataframe: pd.DataFrame | None = None
+    native_parse_error: Exception | None = None
+    try:
+        if extension == ".csv":
+            dataframe = _read_csv_robust(content)
+            logger.info(
+                "Parsed hardware CSV: filename=%s rows=%d columns=%d",
+                Path(filename).name,
+                len(dataframe.index),
+                len(dataframe.columns),
             )
-            if sheet_dataframe.empty:
-                continue
-            sheet_dataframe["_source_sheet"] = sheet_name
-            frames.append(sheet_dataframe)
-            total_rows += len(sheet_dataframe.index)
-            if total_rows > MAX_HARDWARE_ROWS:
-                raise HTTPException(
-                    status_code=413,
-                    detail=(
-                        f"File vượt quá giới hạn {MAX_HARDWARE_ROWS:,} dòng."
-                    ),
+        elif extension == ".xlsx":
+            excel = pd.ExcelFile(
+                io.BytesIO(content),
+                engine="openpyxl",
+            )
+            frames = []
+            total_rows = 0
+            for sheet_name in excel.sheet_names:
+                sheet_dataframe = pd.read_excel(
+                    excel,
+                    sheet_name=sheet_name,
+                    engine="openpyxl",
+                    nrows=MAX_HARDWARE_ROWS + 1 - total_rows,
                 )
+                if sheet_dataframe.empty:
+                    continue
+                sheet_dataframe["_source_sheet"] = sheet_name
+                frames.append(sheet_dataframe)
+                total_rows += len(sheet_dataframe.index)
+                if total_rows > MAX_HARDWARE_ROWS:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            f"File vượt quá giới hạn {MAX_HARDWARE_ROWS:,} dòng."
+                        ),
+                    )
 
-        if not frames:
-            raise ValueError("File Excel không chứa dữ liệu.")
+            if not frames:
+                raise ValueError("File Excel không chứa dữ liệu.")
 
-        dataframe = pd.concat(frames, ignore_index=True)
-    elif extension == ".docx":
-        try:
+            dataframe = pd.concat(frames, ignore_index=True)
+        elif extension == ".docx":
             dataframe = _read_docx_hardware_tables(content)
-        except ValueError as error:
-            raise HTTPException(
-                status_code=400,
-                detail=str(error),
-            ) from error
-    else:
-        try:
+        else:
             dataframe = _read_pdf_hardware_tables(content)
-        except ValueError as error:
-            raise HTTPException(
-                status_code=400,
-                detail=str(error),
-            ) from error
+    except HTTPException as error:
+        if error.status_code != 400 or not allow_documents:
+            raise
+        native_parse_error = error
+    except ValueError as error:
+        if extension not in {".xlsx", ".docx", ".pdf"}:
+            raise
+        native_parse_error = error
 
-    if dataframe.empty:
+    if allow_documents and extension in {".xlsx", ".docx", ".pdf"}:
+        image_dataframe = extract_document_tables_with_gemini(
+            filename,
+            content,
+            dataframe,
+            force_pdf_extraction=(
+                extension == ".pdf" and native_parse_error is not None
+            ),
+        )
+        if image_dataframe is not None and not image_dataframe.empty:
+            dataframe = (
+                image_dataframe
+                if dataframe is None or dataframe.empty
+                else pd.concat(
+                    [dataframe, image_dataframe],
+                    ignore_index=True,
+                    sort=False,
+                )
+            )
+
+    if dataframe is None or dataframe.empty:
+        if native_parse_error is not None:
+            if extension in {".docx", ".pdf"} and isinstance(
+                native_parse_error, ValueError
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=str(native_parse_error),
+                ) from native_parse_error
+            raise native_parse_error
         raise ValueError("File không chứa dữ liệu.")
+
     if len(dataframe.columns) > MAX_HARDWARE_COLUMNS:
         raise HTTPException(
             status_code=413,

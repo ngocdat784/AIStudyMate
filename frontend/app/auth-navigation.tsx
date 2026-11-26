@@ -18,6 +18,43 @@ type AuthUser = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+const navigationGroups = [
+  {
+    label: "Tổng quan",
+    links: [
+      { href: "/dashboard", label: "Tổng quan" },
+      { href: "/reports", label: "Báo cáo" },
+      { href: "/history", label: "Lịch sử" },
+    ],
+  },
+  {
+    label: "Phân tích",
+    links: [
+      { href: "/production", label: "Phân tích sản xuất" },
+      { href: "/machine-intelligence", label: "Phân tích thiết bị" },
+      { href: "/material-intelligence", label: "Phân tích vật liệu" },
+      { href: "/predictive-intelligence", label: "Dự báo sản xuất" },
+    ],
+  },
+  {
+    label: "Chất lượng & điều hành",
+    links: [
+      { href: "/quality", label: "Phân tích chất lượng" },
+      { href: "/root-cause", label: "Điều tra nguyên nhân" },
+      { href: "/enterprise-intelligence", label: "Điều hành doanh nghiệp" },
+    ],
+  },
+  {
+    label: "Dữ liệu & vận hành",
+    links: [
+      { href: "/system-integration", label: "Nghiệm thu tích hợp" },
+      { href: "/monitoring", label: "Giám sát" },
+      { href: "/integrations", label: "Tích hợp dữ liệu" },
+      { href: "/improvements", label: "Cải tiến" },
+    ],
+  },
+] as const;
+
 export default function AuthNavigation() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [logoutError, setLogoutError] = useState("");
@@ -43,6 +80,35 @@ export default function AuthNavigation() {
       window.removeEventListener("storage", refreshUser);
     };
   }, [refreshUser]);
+
+  useEffect(() => {
+    function applyTheme(value: string | null) {
+      const selectedTheme =
+        value === "light" || value === "dark"
+          ? value
+          : window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+      document.documentElement.dataset.theme = selectedTheme;
+    }
+
+    applyTheme(window.localStorage.getItem("hardwareai-theme"));
+    function handleThemeStorage(event: StorageEvent) {
+      if (event.key === "hardwareai-theme") {
+        applyTheme(event.newValue);
+      }
+    }
+
+    window.addEventListener("storage", handleThemeStorage);
+    return () => window.removeEventListener("storage", handleThemeStorage);
+  }, []);
+
+  function toggleTheme() {
+    const nextTheme =
+      document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = nextTheme;
+    window.localStorage.setItem("hardwareai-theme", nextTheme);
+  }
 
   async function logout() {
     const token = window.localStorage.getItem("monitoring-token");
@@ -83,49 +149,62 @@ export default function AuthNavigation() {
   return (
     <div className="site-navigation">
       <nav aria-label="Điều hướng chính">
-        <Link href="/dashboard" onClick={handleProtectedNavigation}>
-          Tổng quan
-        </Link>
-        <Link href="/production" onClick={handleProtectedNavigation}>
-          Phân tích sản xuất
-        </Link>
-        <Link href="/machine-intelligence" onClick={handleProtectedNavigation}>
-          Phân tích thiết bị
-        </Link>
-        <Link href="/material-intelligence" onClick={handleProtectedNavigation}>
-          Phân tích vật liệu
-        </Link>
-        <Link href="/predictive-intelligence" onClick={handleProtectedNavigation}>
-          Dự báo sản xuất
-        </Link>
-        <Link href="/enterprise-intelligence" onClick={handleProtectedNavigation}>
-          Điều hành doanh nghiệp
-        </Link>
-        <Link href="/system-integration" onClick={handleProtectedNavigation}>
-          Nghiệm thu tích hợp
-        </Link>
-        <Link href="/quality" onClick={handleProtectedNavigation}>
-          Phân tích chất lượng
-        </Link>
-        <Link href="/root-cause" onClick={handleProtectedNavigation}>
-          Điều tra nguyên nhân
-        </Link>
-        <Link href="/monitoring" onClick={handleProtectedNavigation}>
-          Giám sát
-        </Link>
-        <Link href="/history" onClick={handleProtectedNavigation}>
-          Lịch sử
-        </Link>
-        <Link href="/reports" onClick={handleProtectedNavigation}>
-          Báo cáo
-        </Link>
-        <Link href="/integrations" onClick={handleProtectedNavigation}>
-          Tích hợp dữ liệu
-        </Link>
-        <Link href="/improvements" onClick={handleProtectedNavigation}>
-          Cải tiến
-        </Link>
+        {navigationGroups.map((group) => (
+          <details className="site-nav-group" key={group.label}>
+            <summary>{group.label}</summary>
+            <div className="site-nav-menu">
+              {group.links.map((item) => (
+                <Link
+                  href={item.href}
+                  key={item.href}
+                  onClick={handleProtectedNavigation}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          </details>
+        ))}
       </nav>
+      <button
+        className="site-theme-toggle"
+        type="button"
+        onClick={toggleTheme}
+        aria-label="Chuyển đổi chế độ sáng và tối"
+        title="Chuyển đổi chế độ sáng và tối"
+      >
+        <svg
+          className="theme-icon-dark"
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M20.4 15.4A8.5 8.5 0 0 1 8.6 3.6 8.5 8.5 0 1 0 20.4 15.4Z" />
+        </svg>
+        <svg
+          className="theme-icon-light"
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
+        </svg>
+        <span className="theme-label-dark">Tối</span>
+        <span className="theme-label-light">Sáng</span>
+      </button>
       {user ? (
         <div className="site-auth-actions">
           <span className="site-user-name">

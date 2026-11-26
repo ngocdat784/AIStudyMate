@@ -560,6 +560,13 @@ labels describe documentation completeness only; they are not statistical
 confidence intervals and do not establish that an action caused the observed
 change. The `/improvements` frontend guides the case through those steps.
 
+The hardware analysis upload accepts CSV/XLSX, DOCX tables, and text-table PDFs.
+Embedded images in XLSX/DOCX and scanned or image-based PDF tables are read
+with the configured Gemini API key when needed; those image/PDF contents are
+sent to Google Gemini for extraction. Native text and spreadsheet tables
+continue to use local parsers. Vision-extracted cells are validated against a
+bounded JSON schema before being added to the analysis input.
+
 Hardware CSV/XLSX ingestion is capped at 10 MB and 100,000 rows per file;
 multi-file requests are capped at 10 files, 25 MB combined, and 100,000 rows
 combined. Merged datasets are compressed and persisted in PostgreSQL for one

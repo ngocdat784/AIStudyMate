@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import FileDropzone from "../components/file-dropzone";
+import HomeFeatureIllustration from "../components/home-feature-illustration";
 import { apiFetch } from "../lib/api";
 import { hasAuthToken, redirectToLogin } from "../lib/auth";
 
@@ -814,6 +815,68 @@ function HardwareInterventionDashboard({
     </section>
   );
 }
+
+const homeFeatures = [
+  {
+    kind: "data",
+    category: "01 · DỮ LIỆU",
+    title: "Làm rõ dữ liệu trước khi ra quyết định",
+    description:
+      "Tải CSV, Excel, PDF hoặc Word để kiểm tra cột thiếu, bản ghi trùng và giá trị bất thường trước khi xem KPI. Bảng nằm trong ảnh có thể được trích xuất bằng Gemini khi backend được cấu hình.",
+  },
+  {
+    kind: "dashboard",
+    category: "02 · PHÂN TÍCH",
+    title: "Nối KPI, xu hướng và góc nhìn vận hành",
+    description:
+      "Theo dõi sản lượng, tỷ lệ lỗi, downtime và các chỉ số sản xuất trong cùng một quy trình. So sánh theo ngày, model, lô hoặc nhóm dữ liệu sẵn có để tìm điểm cần kiểm tra.",
+  },
+  {
+    kind: "history",
+    category: "03 · THEO DÕI",
+    title: "Lưu kết quả để tiếp tục cải tiến",
+    description:
+      "Mở lại lịch sử, quản lý báo cáo và đối chiếu KPI trước–sau can thiệp. Kết quả được trình bày cùng phạm vi dữ liệu và giới hạn phân tích để đội ngũ dễ xác minh.",
+  },
+] as const;
+
+const homeUseCases = [
+  {
+    kind: "production",
+    category: "01 · SẢN LƯỢNG",
+    title: "Theo dõi sản lượng và nhịp vận hành",
+    description:
+      "Nhìn biến động sản lượng theo ngày, so sánh với kế hoạch và xác định giai đoạn cần xem xét thêm; đây là phân tích dữ liệu lịch sử, không phải cam kết hoàn thành đơn hàng.",
+  },
+  {
+    kind: "quality",
+    category: "02 · CHẤT LƯỢNG",
+    title: "Tìm nơi tỷ lệ lỗi tập trung",
+    description:
+      "Đối chiếu lỗi theo model, linh kiện, nhà cung cấp hoặc lô sản xuất để khoanh vùng vấn đề và cung cấp số liệu cho bước kiểm tra tiếp theo.",
+  },
+  {
+    kind: "equipment",
+    category: "03 · THIẾT BỊ",
+    title: "Nhận diện tín hiệu downtime",
+    description:
+      "Theo dõi thời gian dừng và tín hiệu lỗi theo thiết bị, xem thời điểm biến động và ưu tiên máy cần kiểm tra. Tín hiệu thống kê không tự chứng minh nguyên nhân.",
+  },
+  {
+    kind: "materials",
+    category: "04 · VẬT LIỆU",
+    title: "Đối chiếu nhu cầu với tồn kho",
+    description:
+      "So sánh lượng vật liệu hiện có với nhu cầu dự kiến để phát hiện tín hiệu có thể thiếu hụt, sau đó xác minh lại định mức và dữ liệu kho.",
+  },
+  {
+    kind: "improvement",
+    category: "05 · CẢI TIẾN",
+    title: "Đo lường thay đổi trước và sau",
+    description:
+      "So sánh sản lượng, lỗi và downtime giữa hai giai đoạn để đánh giá kết quả can thiệp dựa trên dữ liệu, không thay thế cho đánh giá nhân quả.",
+  },
+] as const;
 
 export default function Home() {
   const router = useRouter();
@@ -1762,7 +1825,10 @@ export default function Home() {
             <a className="hero-primary-action" href="#file-analysis">
               Bắt đầu phân tích <span aria-hidden="true">→</span>
             </a>
-            <a className="hero-secondary-action" href="#available-tools">
+            <a
+              className="hero-secondary-action"
+              href="#available-tools"
+            >
               Khám phá công cụ
             </a>
           </div>
@@ -1828,7 +1894,7 @@ export default function Home() {
             <FileDropzone
               accept=".csv,.xlsx,.pdf,.docx"
               title="Upload hardware data"
-              hint="CSV, XLSX, PDF dạng bảng hoặc DOCX · Max 10MB"
+              hint="CSV/XLSX/PDF/DOCX · Ảnh được gửi Gemini để OCR bảng · Max 10MB"
               className="file-dropzone-home"
               showSelectedFiles={false}
               disabled={loading || comparisonLoading}
@@ -1838,8 +1904,8 @@ export default function Home() {
               <div>
                 <strong>Upload hardware data</strong>
                 <span>
-                  CSV, XLSX, PDF dạng bảng hoặc DOCX · Max 10MB · Kéo thả hoặc
-                  nhấn để chọn
+                  CSV/XLSX/PDF/DOCX · Ảnh được gửi Gemini để OCR bảng · Max
+                  10MB · Kéo thả hoặc nhấn để chọn
                 </span>
               </div>
             </FileDropzone>
@@ -1996,9 +2062,9 @@ export default function Home() {
 
         </section>
 
+        <section className="home-tools-section" id="available-tools">
         <section
           className="content-section available-tools-section"
-          id="available-tools"
         >
           <div className="content-section-heading">
             <span className="content-eyebrow">CÔNG CỤ HARDWAREAI</span>
@@ -2579,49 +2645,57 @@ export default function Home() {
             )}
           </section>
         )}
+        </section>
 
-        <section className="content-section use-cases-section">
-          <div className="content-section-heading">
-            <span className="content-eyebrow">ỨNG DỤNG TRONG VẬN HÀNH</span>
-            <h2>Câu hỏi thực tế, câu trả lời dựa trên dữ liệu.</h2>
+        <section className="home-story-section">
+          <div className="home-story-heading">
+            <span className="content-eyebrow">HARDWAREAI GIÚP GÌ?</span>
+            <h2>Dữ liệu sản xuất rõ ràng hơn, quyết định vững hơn.</h2>
             <p>
-              Tập trung vào những chỉ số mà đội ngũ sản xuất cần theo dõi và
-              giải thích.
+              Từ lúc nhận tệp đến khi theo dõi cải tiến, HardwareAI giúp đội
+              ngũ làm việc với cùng một bức tranh vận hành.
             </p>
           </div>
-          <div className="use-case-grid">
-            <article className="use-case-card">
-              <span>01 / CHẤT LƯỢNG</span>
-              <h3>Điều gì đang làm tỷ lệ lỗi tăng?</h3>
-              <p>
-                Phân tích tỷ lệ lỗi theo model, linh kiện, nhà cung cấp và lô
-                sản xuất.
-              </p>
-            </article>
-            <article className="use-case-card">
-              <span>02 / NĂNG SUẤT</span>
-              <h3>Sản lượng thay đổi ở đâu?</h3>
-              <p>
-                Theo dõi KPI theo ngày, xem biến động và nhận diện khoảng thời
-                gian cần kiểm tra.
-              </p>
-            </article>
-            <article className="use-case-card">
-              <span>03 / CAN THIỆP</span>
-              <h3>Cải tiến có tạo ra khác biệt?</h3>
-              <p>
-                Đối chiếu giai đoạn trước và sau can thiệp dựa trên sản lượng,
-                lỗi và downtime.
-              </p>
-            </article>
-            <article className="use-case-card">
-              <span>04 / ĐIỀU HÀNH</span>
-              <h3>Báo cáo nào cần được chú ý?</h3>
-              <p>
-                Lưu lại phân tích, theo dõi lịch sử và đưa kết quả vào luồng
-                quản lý báo cáo.
-              </p>
-            </article>
+          <div className="home-story-list">
+            {homeFeatures.map((feature, index) => (
+              <article
+                className={`home-story-row${index % 2 ? " is-reversed" : ""}`}
+                key={feature.kind}
+              >
+                <div className="home-story-copy">
+                  <span className="home-story-category">{feature.category}</span>
+                  <h3>{feature.title}</h3>
+                  <p>{feature.description}</p>
+                </div>
+                <HomeFeatureIllustration kind={feature.kind} />
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="home-story-section home-use-cases">
+          <div className="home-story-heading">
+            <span className="content-eyebrow">PHÂN TÍCH CHO NHÀ MÁY</span>
+            <h2>Các bài toán vận hành HardwareAI hỗ trợ.</h2>
+            <p>
+              Chọn góc nhìn theo nhu cầu của đội ngũ; mỗi kết quả cần được đối
+              chiếu với dữ liệu nguồn và bối cảnh thực tế.
+            </p>
+          </div>
+          <div className="home-story-list">
+            {homeUseCases.map((useCase, index) => (
+              <article
+                className={`home-story-row${index % 2 ? " is-reversed" : ""}`}
+                key={useCase.kind}
+              >
+                <div className="home-story-copy">
+                  <span className="home-story-category">{useCase.category}</span>
+                  <h3>{useCase.title}</h3>
+                  <p>{useCase.description}</p>
+                </div>
+                <HomeFeatureIllustration kind={useCase.kind} />
+              </article>
+            ))}
           </div>
         </section>
 
@@ -2630,22 +2704,31 @@ export default function Home() {
             <span className="content-eyebrow">CÁCH BẮT ĐẦU</span>
             <h2>Từ tệp dữ liệu đến kế hoạch hành động.</h2>
             <p>
-              Không cần viết truy vấn. Chọn dữ liệu, xác định câu hỏi và kiểm
-              tra các kết quả có bằng chứng.
+              Chọn dữ liệu, kiểm tra chất lượng, xem KPI và xác minh kết quả
+              trước khi đưa ra quyết định vận hành.
             </p>
           </div>
           <ol className="workflow-steps">
             <li>
               <span>01</span>
-              <div><strong>Tải dữ liệu</strong><p>Chọn CSV, Excel, PDF hoặc DOCX.</p></div>
+              <div>
+                <strong>Tải dữ liệu</strong>
+                <p>Chọn CSV, Excel, PDF hoặc DOCX.</p>
+              </div>
             </li>
             <li>
               <span>02</span>
-              <div><strong>Kiểm tra &amp; phân tích</strong><p>Xem chất lượng dữ liệu, KPI và xu hướng.</p></div>
+              <div>
+                <strong>Kiểm tra &amp; phân tích</strong>
+                <p>Xem chất lượng dữ liệu, KPI và xu hướng.</p>
+              </div>
             </li>
             <li>
               <span>03</span>
-              <div><strong>Chia sẻ kết quả</strong><p>Lưu lịch sử hoặc tạo báo cáo cho đội ngũ.</p></div>
+              <div>
+                <strong>Chia sẻ kết quả</strong>
+                <p>Lưu lịch sử hoặc tạo báo cáo cho đội ngũ.</p>
+              </div>
             </li>
           </ol>
         </section>
@@ -2660,9 +2743,21 @@ export default function Home() {
             </p>
           </div>
           <div className="prompt-guidance-grid">
-            <article><span>01</span><strong>Chọn câu hỏi</strong><p>Bạn muốn tìm nguyên nhân, so sánh hay theo dõi xu hướng?</p></article>
-            <article><span>02</span><strong>Nêu phạm vi</strong><p>Chỉ rõ model, nhà cung cấp hoặc thời gian cần xem.</p></article>
-            <article><span>03</span><strong>Yêu cầu bằng chứng</strong><p>Đề nghị số liệu, giả định và các giới hạn dữ liệu.</p></article>
+            <article>
+              <span>01</span>
+              <strong>Chọn câu hỏi</strong>
+              <p>Bạn muốn tìm nguyên nhân, so sánh hay theo dõi xu hướng?</p>
+            </article>
+            <article>
+              <span>02</span>
+              <strong>Nêu phạm vi</strong>
+              <p>Chỉ rõ model, nhà cung cấp hoặc thời gian cần xem.</p>
+            </article>
+            <article>
+              <span>03</span>
+              <strong>Yêu cầu bằng chứng</strong>
+              <p>Đề nghị số liệu, giả định và các giới hạn dữ liệu.</p>
+            </article>
           </div>
           <div className="prompt-template-list">
             {[
@@ -2677,37 +2772,10 @@ export default function Home() {
                 onClick={() => applyPromptTemplate(prompt)}
               >
                 <span>“{prompt}”</span>
-                <strong>Dùng gợi ý <span aria-hidden="true">↗</span></strong>
+                <strong>
+                  Dùng gợi ý <span aria-hidden="true">↗</span>
+                </strong>
               </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="future-section">
-          <div className="content-section-heading">
-            <span className="content-eyebrow">ĐANG ĐƯỢC PHÁT TRIỂN</span>
-            <h2>Những công cụ mới đang trên đường đến.</h2>
-            <p>
-              Một số khả năng chưa được hỗ trợ ở backend. Chúng tôi đang hoàn
-              thiện để có thể giới thiệu trong tương lai.
-            </p>
-          </div>
-          <div className="future-grid">
-            {[
-              ["Kết nối nguồn dữ liệu", "Đồng bộ tự động từ các hệ thống vận hành và kho dữ liệu."],
-              ["Lịch phân tích tự động", "Lên lịch chạy lại báo cáo khi có dữ liệu mới."],
-              ["Tùy chỉnh dashboard", "Tạo dashboard KPI theo vai trò và nhu cầu từng đội ngũ."],
-              ["Tài liệu trình bày", "Chuyển kết quả phân tích thành nội dung sẵn sàng chia sẻ."],
-            ].map(([title, description]) => (
-              <article className="future-card" key={title}>
-                <span className="future-badge">SẮP RA MẮT</span>
-                <h3>{title}</h3>
-                <p>{description}</p>
-                <span className="future-note">
-                  Tính năng đang trong quá trình phát triển. Hãy đón chờ trong
-                  tương lai.
-                </span>
-              </article>
             ))}
           </div>
         </section>
@@ -2720,19 +2788,33 @@ export default function Home() {
           <div className="faq-list">
             <details>
               <summary>HardwareAI nhận những định dạng tệp nào?</summary>
-              <p>Phân tích một tệp hỗ trợ CSV, XLSX, PDF có bảng văn bản và DOCX. Chức năng gộp nhiều tệp hiện hỗ trợ CSV và XLSX.</p>
+              <p>
+                Phân tích một tệp hỗ trợ CSV, XLSX, PDF có bảng văn bản và
+                DOCX. Chức năng gộp nhiều tệp hiện hỗ trợ CSV và XLSX.
+              </p>
             </details>
             <details>
               <summary>Kết quả có thể lưu lại để xem sau không?</summary>
-              <p>Có. Đăng nhập để xem lịch sử phân tích, mở lại chi tiết và sử dụng các chức năng báo cáo.</p>
+              <p>
+                Có. Đăng nhập để xem lịch sử phân tích, mở lại chi tiết và sử
+                dụng các chức năng báo cáo.
+              </p>
             </details>
             <details>
               <summary>AI có tự quyết định KPI và cảnh báo không?</summary>
-              <p>Các KPI và điều kiện cảnh báo được hệ thống tính toán; phần AI hỗ trợ diễn giải kết quả và gợi ý nội dung cần kiểm tra.</p>
+              <p>
+                Các KPI và điều kiện cảnh báo được hệ thống tính toán; phần AI
+                hỗ trợ diễn giải kết quả và gợi ý nội dung cần kiểm tra.
+              </p>
             </details>
             <details>
-              <summary>Tôi có thể yêu cầu phân tích theo câu hỏi riêng không?</summary>
-              <p>Có. Nhập câu hỏi trong phần phân tích tệp để bổ sung góc nhìn theo phạm vi bạn quan tâm.</p>
+              <summary>
+                Tôi có thể yêu cầu phân tích theo câu hỏi riêng không?
+              </summary>
+              <p>
+                Có. Nhập câu hỏi trong phần phân tích tệp để bổ sung góc nhìn
+                theo phạm vi bạn quan tâm.
+              </p>
             </details>
           </div>
         </section>
