@@ -6743,3 +6743,122 @@ html[data-theme="dark"] .capability-icon {
     min-height: 40px;
   }
 }
+
+.machine-table-wrapper,
+.production-table-scroll,
+.trend-series-table-wrapper,
+.history-table-wrap,
+.root-cause-matrix-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgb(16 24 40 / 5%);
+}
+
+.machine-table,
+.production-table,
+.trend-series-table,
+.history-table,
+.root-cause-matrix {
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--ink);
+}
+
+.machine-table th,
+.machine-table td,
+.production-table th,
+.production-table td,
+.trend-series-table th,
+.trend-series-table td,
+.history-table th,
+.history-table td,
+.root-cause-matrix th,
+.root-cause-matrix td {
+  padding: 13px 15px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.machine-table thead th,
+.production-table thead th,
+.trend-series-table thead th,
+.history-table thead th,
+.root-cause-matrix thead th {
+  background: linear-gradient(180deg, var(--surface-subtle), var(--surface));
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.045em;
+  white-space: nowrap;
+}
+
+.machine-table tbody td,
+.production-table tbody td,
+.trend-series-table tbody td,
+.history-table tbody td {
+  color: var(--ink-muted);
+}
+
+.machine-table tbody tr:nth-child(even) td,
+.production-table tbody tr:nth-child(even) td,
+.trend-series-table tbody tr:nth-child(even) td,
+.history-table tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--surface-subtle) 62%, var(--surface));
+}
+
+.machine-table tbody tr:hover td,
+.production-table tbody tr:hover td,
+.trend-series-table tbody tr:hover td,
+.history-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--blue) 8%, var(--surface));
+}
+
+.machine-table tbody tr:last-child td,
+.production-table tbody tr:last-child td,
+.trend-series-table tbody tr:last-child td,
+.history-table tbody tr:last-child td,
+.root-cause-matrix tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.machine-table tbody td:first-child,
+.production-table tbody td:first-child,
+.trend-series-table tbody td:first-child,
+.history-table tbody td:first-child {
+  color: var(--ink);
+}
+
+.history-table {
+  min-width: 900px;
+}
+
+.root-cause-matrix {
+  min-width: 700px;
+}
+
+.root-cause-matrix th,
+.root-cause-matrix td {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.root-cause-matrix tr > :last-child {
+  border-right: 0;
+}
+
+@media (max-width: 720px) {
+  .machine-table th,
+  .machine-table td,
+  .production-table th,
+  .production-table td,
+  .trend-series-table th,
+  .trend-series-table td,
+  .history-table th,
+  .history-table td,
+  .root-cause-matrix th,
+  .root-cause-matrix td {
+    padding: 11px 12px;
+  }
+}
