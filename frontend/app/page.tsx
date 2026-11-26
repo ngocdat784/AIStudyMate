@@ -13,7 +13,11 @@ import { useRouter } from "next/navigation";
 import FileDropzone from "../components/file-dropzone";
 import HomeFeatureIllustration from "../components/home-feature-illustration";
 import { apiFetch } from "../lib/api";
-import { hasAuthToken, redirectToLogin } from "../lib/auth";
+import {
+  AUTH_CHANGED_EVENT,
+  hasAuthToken,
+  redirectToLogin,
+} from "../lib/auth";
 
 type KPI = {
   name: string;
@@ -880,6 +884,7 @@ const homeUseCases = [
 
 export default function Home() {
   const router = useRouter();
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [selectedFile, setSelectedFile] =
     useState<File | null>(null);
 
@@ -970,6 +975,33 @@ export default function Home() {
   const [interventionError, setInterventionError] = useState("");
   const [interventionResult, setInterventionResult] =
     useState<HardwareInterventionResult | null>(null);
+
+  const protectedToolsStatus =
+    isAuthenticated === null
+      ? "ĐANG KIỂM TRA"
+      : isAuthenticated
+        ? "SẴN SÀNG"
+        : "CẦN ĐĂNG NHẬP";
+  const protectedToolsStatusClass =
+    isAuthenticated === null
+      ? "capability-status-checking"
+      : isAuthenticated
+        ? "capability-status-ready"
+        : "capability-status-auth-required";
+
+  useEffect(() => {
+    function syncAuthentication() {
+      setIsAuthenticated(hasAuthToken());
+    }
+
+    syncAuthentication();
+    window.addEventListener(AUTH_CHANGED_EVENT, syncAuthentication);
+    window.addEventListener("storage", syncAuthentication);
+    return () => {
+      window.removeEventListener(AUTH_CHANGED_EVENT, syncAuthentication);
+      window.removeEventListener("storage", syncAuthentication);
+    };
+  }, []);
 
   useEffect(() => {
     if (!hasAuthToken()) {
@@ -2107,7 +2139,11 @@ export default function Home() {
             </a>
             <Link className="capability-card" href="/history">
               <span className="capability-icon">04</span>
-              <span className="capability-status">CẦN ĐĂNG NHẬP</span>
+              <span
+                className={`capability-status ${protectedToolsStatusClass}`}
+              >
+                {protectedToolsStatus}
+              </span>
               <h3>Lịch sử phân tích</h3>
               <p>
                 Mở lại kết quả đã lưu, xem chi tiết và quản lý các lần phân
@@ -2117,7 +2153,11 @@ export default function Home() {
             </Link>
             <Link className="capability-card" href="/reports">
               <span className="capability-icon">05</span>
-              <span className="capability-status">CẦN ĐĂNG NHẬP</span>
+              <span
+                className={`capability-status ${protectedToolsStatusClass}`}
+              >
+                {protectedToolsStatus}
+              </span>
               <h3>Báo cáo có kiểm soát</h3>
               <p>
                 Soạn bản nháp từ kết quả, quản lý phiên bản và luồng duyệt báo
@@ -2127,7 +2167,11 @@ export default function Home() {
             </Link>
             <Link className="capability-card" href="/monitoring">
               <span className="capability-icon">06</span>
-              <span className="capability-status">CẦN ĐĂNG NHẬP</span>
+              <span
+                className={`capability-status ${protectedToolsStatusClass}`}
+              >
+                {protectedToolsStatus}
+              </span>
               <h3>Giám sát &amp; cảnh báo</h3>
               <p>
                 Theo dõi chỉ số, thiết lập ngưỡng và quản lý cảnh báo cho nhà

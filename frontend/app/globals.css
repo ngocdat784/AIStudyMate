@@ -4547,10 +4547,39 @@ body {
   position: absolute;
   top: 23px;
   right: 20px;
-  color: #39704e;
-  font-size: 9px;
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--color-success) 34%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-success) 9%, var(--surface));
+  color: var(--color-success);
+  font-size: 12px;
   font-weight: 800;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.035em;
+}
+
+.capability-status::before {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.capability-status-auth-required {
+  border-color: color-mix(in srgb, var(--color-warning) 34%, var(--line));
+  background: color-mix(in srgb, var(--color-warning) 9%, var(--surface));
+  color: var(--color-warning);
+}
+
+.capability-status-checking {
+  border-color: var(--line);
+  background: var(--surface-subtle);
+  color: var(--ink-muted);
 }
 
 .capability-card h3,
