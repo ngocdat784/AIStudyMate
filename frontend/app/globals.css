@@ -4,7 +4,7 @@
 
 :root {
   --color-ink: #172033;
-  --color-muted: #64748b;
+  --color-muted: #526174;
   --color-primary: #2259bd;
   --color-primary-soft: #edf4ff;
   --color-border: #dce3ed;
@@ -6147,13 +6147,13 @@ html[data-theme="dark"] {
   --surface: #151f30;
   --surface-subtle: #1b2940;
   --ink: #edf2fa;
-  --ink-muted: #b7c3d5;
+  --ink-muted: #c5d0df;
   --line: #35445a;
   --blue: #76a7ff;
   --blue-dark: #a9c8ff;
   --navy: #09111e;
   --color-ink: #edf2fa;
-  --color-muted: #b7c3d5;
+  --color-muted: #c5d0df;
   --color-primary: #76a7ff;
   --color-primary-soft: #1b2b45;
   --color-border: #35445a;
@@ -6171,15 +6171,15 @@ html[data-theme="dark"] {
   --chart-grid: #35465e;
   --chart-track: #26364d;
   --chart-surface: #18263a;
-  --chart-label: #c2cede;
+  --chart-label: #c5d0df;
 }
 
 body {
   background: var(--page-bg);
   color: var(--ink);
   font-family: var(--font-sans);
-  font-size: 16px;
-  line-height: 1.55;
+  font-size: 17px;
+  line-height: 1.6;
 }
 
 button,
@@ -6764,6 +6764,7 @@ html[data-theme="dark"] .capability-icon {
   border-collapse: separate;
   border-spacing: 0;
   color: var(--ink);
+  font-size: 14px;
 }
 
 .machine-table th,
@@ -6788,7 +6789,7 @@ html[data-theme="dark"] .capability-icon {
 .root-cause-matrix thead th {
   background: linear-gradient(180deg, var(--surface-subtle), var(--surface));
   color: var(--ink-muted);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 750;
   letter-spacing: 0.045em;
   white-space: nowrap;
@@ -6799,6 +6800,7 @@ html[data-theme="dark"] .capability-icon {
 .trend-series-table tbody td,
 .history-table tbody td {
   color: var(--ink-muted);
+  font-size: 14px;
 }
 
 .machine-table tbody tr:nth-child(even) td,
@@ -6861,4 +6863,80 @@ html[data-theme="dark"] .capability-icon {
   .root-cause-matrix td {
     padding: 11px 12px;
   }
+}
+
+body {
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+body small,
+body :is(
+    [class*="eyebrow"],
+    [class*="label"],
+    [class*="hint"],
+    [class*="badge"],
+    [class*="meta"],
+    [class*="muted"],
+    [class*="date"],
+    [class*="unit"],
+    [class*="note"],
+    [class*="status"],
+    [class*="type"],
+    [class*="caption"],
+    [class*="description"],
+    [class*="versus"],
+    [class*="evidence"]
+  ) {
+  font-size: max(13px, 0.9em);
+  line-height: 1.45;
+}
+
+body :is(
+    .chart-value,
+    .chart-date,
+    .executive-trend-column,
+    .trend-chart-column,
+    .trend-chart-column strong,
+    .comparison-bar-row,
+    .comparison-ai > span,
+    .trend-dimension-heading span,
+    .trend-dimension-omitted,
+    .trend-dimension-total,
+    .trend-thresholds,
+    .trend-anomaly p,
+    .trend-ai-summary > span,
+    .trend-record-summary span,
+    .dashboard-card-header > div > span,
+    .ai-item > span,
+    .anomaly-highlight-type,
+    .risk-level,
+    .risk-entity-type,
+    .action-target,
+    .capability-status,
+    .use-case-card > span,
+    .future-note,
+    .comparison-row-difference,
+    .evidence-item small,
+    .evidence-value-row small,
+    .priority-badge
+  ) {
+  font-size: max(13px, 0.9em);
+  line-height: 1.45;
+}
+
+body :is(
+    .dashboard-card-header > div > span,
+    .ai-item > span,
+    .comparison-versus,
+    .comparison-ai > span,
+    .trend-dimension-heading span,
+    .trend-dimension-total,
+    .trend-thresholds,
+    .trend-anomaly p,
+    .trend-ai-summary > span,
+    .future-note,
+    .anomaly-highlight-type
+  ) {
+  color: var(--ink-muted);
 }
