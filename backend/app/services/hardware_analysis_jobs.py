@@ -148,7 +148,14 @@ def fail_hardware_analysis_job(job_id: str, error: Exception) -> None:
 
         job.error_code = type(error).__name__[:80]
         job.lease_expires_at = None
-        if job.attempt_count < settings.HARDWARE_ANALYSIS_JOB_MAX_ATTEMPTS:
+        input_error = isinstance(error, ValueError) or (
+            isinstance(error, HTTPException)
+            and 400 <= error.status_code < 500
+        )
+        if (
+            not input_error
+            and job.attempt_count < settings.HARDWARE_ANALYSIS_JOB_MAX_ATTEMPTS
+        ):
             delay_seconds = min(30, 2 ** (job.attempt_count - 1))
             job.status = "queued"
             job.stage = "retry_wait"
@@ -163,8 +170,16 @@ def fail_hardware_analysis_job(job_id: str, error: Exception) -> None:
             job.status = "failed"
             job.stage = "failed"
             job.error_message = (
-                "Không thể hoàn tất phân tích sau nhiều lần thử. "
-                "Vui lòng kiểm tra file hoặc thử lại sau."
+                (
+                    str(error.detail)
+                    if isinstance(error, HTTPException)
+                    else str(error)
+                )[:1000]
+                if input_error
+                else (
+                    "Không thể hoàn tất phân tích sau nhiều lần thử. "
+                    "Vui lòng kiểm tra file hoặc thử lại sau."
+                )
             )
             job.input_file = None
             job.custom_prompt = ""

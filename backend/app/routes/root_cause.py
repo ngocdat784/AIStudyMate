@@ -13,6 +13,10 @@ from app.models import AnalysisHistory
 from app.models.monitoring import AlertUser, Plant
 from app.routes.hardware import _read_hardware_upload
 from app.services.analysis_history_service import create_analysis_history
+from app.services.analysis_readiness_service import (
+    classify_analysis_dataset,
+    ensure_analysis_ready,
+)
 from app.services.api_rate_limit import rate_limit_dependency
 from app.services.monitoring_auth import (
     get_current_user,
@@ -168,6 +172,21 @@ async def analyze_root_cause(
                 production_file
             )
             quality_dataframe = await _read_hardware_upload(quality_file)
+            production_classification = classify_analysis_dataset(
+                production_dataframe,
+                column_mapping=_parse_mapping(production_column_mapping),
+            )
+            quality_classification = classify_analysis_dataset(
+                quality_dataframe,
+                column_mapping=_parse_mapping(quality_column_mapping),
+            )
+            ensure_analysis_ready(production_classification, "production")
+            ensure_analysis_ready(quality_classification, "quality")
+            classification = {
+                "mode": "split",
+                "production_file": production_classification,
+                "quality_file": quality_classification,
+            }
             dataframe = None
         else:
             if file is None:
@@ -176,6 +195,11 @@ async def analyze_root_cause(
                     detail="A combined file is required.",
                 )
             dataframe = await _read_hardware_upload(file)
+            classification = classify_analysis_dataset(
+                dataframe,
+                column_mapping=_parse_mapping(column_mapping),
+            )
+            ensure_analysis_ready(classification, "root_cause")
             production_dataframe = None
             quality_dataframe = None
         mapping = _parse_mapping(column_mapping)
@@ -201,6 +225,7 @@ async def analyze_root_cause(
             outcome_metric=outcome_metric,
             include_ai=include_ai,
         )
+        result["dataset_classification"] = classification
     except HTTPException:
         raise
     except ValueError as error:

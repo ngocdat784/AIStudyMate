@@ -270,6 +270,7 @@ def orchestrate_manufacturing_analysis(
     downtime_unit: str = "minutes",
     production_unit: str = "unit",
     include_ai: bool = True,
+    require_production: bool = True,
 ) -> dict[str, Any]:
     dataset: ManufacturingDataset = normalize_manufacturing_dataframe(
         dataframe,
@@ -277,6 +278,7 @@ def orchestrate_manufacturing_analysis(
         source_timezone=source_timezone,
         downtime_unit=downtime_unit,
         production_unit=production_unit,
+        require_production=require_production,
     )
     classification = _classify_request(question, source_filename)
     plan = _execution_plan(classification)

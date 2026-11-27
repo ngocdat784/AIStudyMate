@@ -4190,6 +4190,8 @@ button {
   --line: #dce3ed;
   --blue: #175cd3;
   --blue-dark: #1247a8;
+  --action-button-bg: #1247a8;
+  --action-button-hover: #0c347b;
   --navy: #101828;
 }
 
@@ -6224,6 +6226,8 @@ html[data-theme="dark"] {
   --line: #35445a;
   --blue: #76a7ff;
   --blue-dark: #a9c8ff;
+  --action-button-bg: #315fbd;
+  --action-button-hover: #4776d5;
   --navy: #09111e;
   --color-ink: #edf2fa;
   --color-muted: #c5d0df;
@@ -6770,6 +6774,180 @@ html[data-theme="dark"] .capability-icon {
 .reports-page,
 .reset-password-page {
   color: var(--ink);
+}
+
+.export-report-card {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.export-report-info h3 {
+  color: var(--ink);
+  font-size: 20px;
+}
+
+.export-report-info p,
+.export-report-sections legend {
+  color: var(--ink-muted);
+}
+
+.export-report-sections {
+  width: 100%;
+  margin: 0;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+}
+
+.export-report-scope {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  margin: 0;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+  color: var(--ink);
+}
+
+.export-report-scope legend {
+  padding-inline: 5px;
+  color: var(--ink-muted);
+  font-weight: 700;
+}
+
+.export-report-scope-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px 18px;
+}
+
+.export-report-scope-fields label {
+  display: grid;
+  gap: 6px;
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.export-report-scope-fields select {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.export-report-scope-fields select:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.export-report-scope-error {
+  color: var(--danger);
+}
+
+.export-report-section-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px 18px;
+}
+
+.export-report-section-options label,
+.reports-export-setting label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.export-report-section-options input,
+.reports-export-setting input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: var(--blue);
+}
+
+.export-report-button {
+  border-color: var(--action-button-bg);
+  background: var(--action-button-bg);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.export-report-button:hover:not(:disabled) {
+  border-color: var(--action-button-hover);
+  background: var(--action-button-hover);
+  color: #fff;
+}
+
+.export-report-button:focus-visible,
+.export-report-section-options input:focus-visible,
+.reports-export-setting input:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: 3px;
+}
+
+.reports-page > header,
+.reports-page > section,
+.reports-page > section > section {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.reports-page h1,
+.reports-page h2,
+.reports-page h3,
+.reports-page p,
+.reports-page label,
+.reports-page li {
+  color: var(--ink);
+}
+
+.reports-page button,
+.reports-page input,
+.reports-page select,
+.reports-page textarea {
+  border-color: var(--line);
+  background: var(--surface-subtle);
+  color: var(--ink);
+}
+
+.reports-page button:hover:not(:disabled) {
+  border-color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 12%, var(--surface));
+  color: var(--ink);
+}
+
+.reports-page button:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.reports-page .reports-export-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.reports-export-setting h2,
+.reports-export-setting p {
+  margin: 0;
+}
+
+.reports-export-setting p {
+  margin-top: 6px;
+  color: var(--ink-muted);
 }
 
 @media (min-width: 601px) and (max-width: 1080px) {

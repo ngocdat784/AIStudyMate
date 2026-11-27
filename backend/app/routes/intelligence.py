@@ -13,6 +13,10 @@ from app.models import AnalysisHistory
 from app.models.monitoring import AlertUser, Plant
 from app.routes.hardware import _read_hardware_upload
 from app.services.analysis_history_service import create_analysis_history
+from app.services.analysis_readiness_service import (
+    classify_analysis_dataset,
+    ensure_analysis_ready,
+)
 from app.services.api_rate_limit import rate_limit_dependency
 from app.services.intelligence_orchestrator import (
     orchestrate_manufacturing_analysis,
@@ -80,6 +84,11 @@ async def analyze_manufacturing_file(
     try:
         dataframe = await _read_hardware_upload(file)
         mapping = _parse_column_mapping(column_mapping)
+        classification = classify_analysis_dataset(
+            dataframe,
+            column_mapping=mapping,
+        )
+        ensure_analysis_ready(classification, "intelligence")
         result = await run_in_threadpool(
             orchestrate_manufacturing_analysis,
             dataframe,
@@ -90,7 +99,9 @@ async def analyze_manufacturing_file(
             downtime_unit=downtime_unit,
             production_unit=production_unit,
             include_ai=include_ai,
+            require_production=False,
         )
+        result["dataset_classification"] = classification
     except HTTPException:
         raise
     except ValueError as error:

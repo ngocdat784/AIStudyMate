@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.database.connection import get_db
 from app.models.monitoring import (
     AlertUser,
+    ApplicationSetting,
     Department,
     Factory,
     GovernedReport,
@@ -67,6 +68,10 @@ class ReviewRequest(BaseModel):
 
     decision: Literal["approved", "rejected"]
     reason: str | None = Field(default=None, max_length=2000)
+
+
+class ExportFeatureSettingUpdate(BaseModel):
+    direct_export_enabled: bool
 
 
 def _contains_report_value(value: Any) -> bool:
@@ -340,6 +345,50 @@ def list_reports(
     return result
 
 
+@router.get("/export-settings")
+def get_export_settings(
+    db: Session = Depends(get_db),
+    _: AlertUser = Depends(get_current_user),
+) -> dict[str, bool]:
+    setting = db.get(ApplicationSetting, "hardware_direct_export")
+    return {
+        "direct_export_enabled": bool(
+            setting and setting.value.get("enabled", False)
+        )
+    }
+
+
+@router.put("/export-settings")
+def update_export_settings(
+    request: ExportFeatureSettingUpdate,
+    db: Session = Depends(get_db),
+    user: AlertUser = Depends(require_roles("admin")),
+) -> dict[str, bool]:
+    setting = db.get(ApplicationSetting, "hardware_direct_export")
+    previous_value = (
+        bool(setting.value.get("enabled", False)) if setting else False
+    )
+    if setting is None:
+        setting = ApplicationSetting(
+            key="hardware_direct_export",
+            value={"enabled": request.direct_export_enabled},
+        )
+        db.add(setting)
+    else:
+        setting.value = {"enabled": request.direct_export_enabled}
+    record_user_action(
+        db,
+        actor=user,
+        action="report.direct_export_setting_changed",
+        object_type="application_setting",
+        object_id="hardware_direct_export",
+        before_data={"enabled": previous_value},
+        after_data={"enabled": request.direct_export_enabled},
+    )
+    db.commit()
+    return {"direct_export_enabled": request.direct_export_enabled}
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_report(
     request: ReportCreate,
@@ -396,7 +445,7 @@ def create_report(
     return _report_json(report, version)
 
 
-@router.get("/{report_id}")
+@router.get("/{report_id:int}")
 def get_report(
     report_id: int,
     db: Session = Depends(get_db),
@@ -416,7 +465,7 @@ def get_report(
     return result
 
 
-@router.post("/{report_id}/versions")
+@router.post("/{report_id:int}/versions")
 def create_report_version(
     report_id: int,
     request: ReportVersionUpdate,
@@ -483,7 +532,7 @@ def create_report_version(
     return _report_json(report, version)
 
 
-@router.post("/{report_id}/submit")
+@router.post("/{report_id:int}/submit")
 def submit_report(
     report_id: int,
     db: Session = Depends(get_db),
@@ -518,7 +567,7 @@ def submit_report(
     return _report_json(report, version)
 
 
-@router.post("/{report_id}/review")
+@router.post("/{report_id:int}/review")
 def review_report(
     report_id: int,
     request: ReviewRequest,
@@ -551,7 +600,7 @@ def review_report(
     return _report_json(report, version)
 
 
-@router.post("/{report_id}/publish")
+@router.post("/{report_id:int}/publish")
 def publish_report(
     report_id: int,
     db: Session = Depends(get_db),
@@ -574,7 +623,7 @@ def publish_report(
     return _report_json(report, version)
 
 
-@router.get("/{report_id}/export")
+@router.get("/{report_id:int}/export")
 def export_published_report(
     report_id: int,
     file_format: Literal["pdf", "xlsx"] = Query(default="pdf", alias="format"),

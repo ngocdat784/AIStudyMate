@@ -1,31 +1,31 @@
 # AIpicture
 HardwareAI application workspace.
 
-## Run the local frontend with the deployed backend
+## Frontend API proxy targets
 
-The local frontend is configured through `frontend/.env.local` to proxy API
-requests to the Railway backend. Local development therefore uses the same
-backend and PostgreSQL data as the public frontend; it does not require the
-local backend or Docker Compose services to be started.
+The frontend proxies browser API requests through its same-origin `/api` route.
+By default, `next dev` targets the local backend at
+`http://127.0.0.1:8000`; Vercel production and preview builds target the Railway
+backend at `https://aistudymate-production.up.railway.app`.
 
-Next.js uses the Railway HTTPS origin as the default API rewrite target.
-For Vercel, set `BACKEND_INTERNAL_URL` to that same origin in the project's
-Environment Variables for Production (and Preview if used), then redeploy.
-The value is used by the server-side rewrite and should not be exposed as a
+The target can be overridden per environment with `BACKEND_INTERNAL_URL`.
+Set it to the Railway origin in Vercel's Environment Variables for Production
+and Preview, then redeploy. Keep it server-side; do not expose it through a
 `NEXT_PUBLIC_*` variable.
 
-To use a different backend, copy `frontend/.env.local.example` to
-`frontend/.env.local` and set `BACKEND_INTERNAL_URL` to that backend's public
-HTTPS origin. Then start only the frontend:
+For local development, start the backend on port 8000, then start the frontend.
+To use Railway instead, set `BACKEND_INTERNAL_URL` in
+`frontend/.env.local` to the Railway origin and restart Next.js:
 
 ```powershell
-cd frontend
+cd D:\AIpicture\frontend
 npm run dev
 ```
 
-The local PostgreSQL database is separate and is not automatically copied to
-Railway. Data written through this frontend goes to the configured remote
-backend and its database.
+When using the local target, data goes to the local backend's configured
+database. When using Railway, data goes to Railway's database. A Cloudflare
+tunnel to the local frontend still uses the local target because Next.js
+forwards API requests server-side.
 
 ## Local deployment with Docker Compose
 

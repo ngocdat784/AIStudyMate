@@ -234,6 +234,12 @@ export default function MonitoringPage() {
   const [ruleProduct, setRuleProduct] = useState("");
   const [filterType, setFilterType] = useState("");
   const canOperate = user?.role === "admin" || user?.role === "operator";
+  const factoriesForSelectedOrganization = factories.filter(
+    (factory) => factory.organization_id === Number(selectedOrganizationId),
+  );
+  const selectedFactoryIsAvailable = factoriesForSelectedOrganization.some(
+    (factory) => String(factory.id) === selectedFactoryId,
+  );
   const selectedPlantInfo = useMemo(
     () => plants.find((plant) => String(plant.id) === selectedPlant),
     [plants, selectedPlant],
@@ -465,21 +471,36 @@ export default function MonitoringPage() {
 
   async function createPlant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setError("");
+    setMessage("");
     try {
-      if (!selectedFactoryId) {
-        throw new Error("Hãy chọn Factory trước khi tạo Plant.");
+      const selectedFactory = factoriesForSelectedOrganization.find(
+        (factory) => String(factory.id) === selectedFactoryId,
+      );
+      if (!selectedOrganizationId) {
+        throw new Error("Hãy chọn Organization trước khi tạo Plant.");
       }
-      await request("/api/monitoring/plants", {
+      if (!selectedFactory) {
+        throw new Error(
+          "Hãy tạo hoặc chọn Factory thuộc Organization trước khi tạo Plant.",
+        );
+      }
+      const created = await request<{ id: number; name: string }>(
+        "/api/monitoring/plants",
+        {
         method: "POST",
         body: JSON.stringify({
           name: plantName,
           timezone: "Asia/Ho_Chi_Minh",
-          factory_id: Number(selectedFactoryId),
+          factory_id: selectedFactory.id,
           department_id: selectedDepartmentId ? Number(selectedDepartmentId) : null,
         }),
-      });
+        },
+      );
       setPlantName("");
+      setSelectedPlant(String(created.id));
       await refresh();
+      setMessage(`Đã tạo Plant "${created.name}".`);
     } catch (cause) {
       setError((cause as Error).message);
     }
@@ -579,6 +600,8 @@ export default function MonitoringPage() {
 
   async function createFactory(event: FormEvent<HTMLFormElement>) {
       event.preventDefault();
+      setError("");
+      setMessage("");
       try {
         if (!selectedOrganizationId) throw new Error("Hãy chọn Organization.");
         const created = await request<Factory>("/api/monitoring/factories", {
@@ -591,6 +614,7 @@ export default function MonitoringPage() {
         setFactoryName("");
         setSelectedFactoryId(String(created.id));
         await refresh();
+        setMessage(`Đã tạo Factory "${created.name}". Bây giờ có thể tạo Plant.`);
       } catch (cause) {
         setError((cause as Error).message);
       }
@@ -946,22 +970,42 @@ export default function MonitoringPage() {
                 <input aria-label="Tên Factory" placeholder="Tên Factory" required value={factoryName} onChange={(event) => setFactoryName(event.target.value)} style={styles.input} />
                 <button disabled={!selectedOrganizationId} style={styles.button}>Tạo Factory</button>
               </form>
+              <label>Factory cho Department/Plant
+                <select
+                  value={selectedFactoryId}
+                  onChange={(event) => {
+                    setSelectedFactoryId(event.target.value);
+                    setSelectedDepartmentId("");
+                  }}
+                  disabled={!selectedOrganizationId}
+                  style={styles.input}
+                >
+                  <option value="">Chọn Factory</option>
+                  {factoriesForSelectedOrganization.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name}</option>
+                  ))}
+                </select>
+              </label>
+              {!selectedOrganizationId && (
+                <p>Chọn hoặc tạo Organization trước khi tạo Factory và Plant.</p>
+              )}
+              {selectedOrganizationId &&
+                factoriesForSelectedOrganization.length === 0 && (
+                  <p>
+                    Organization này chưa có Factory. Hãy tạo Factory ở trên,
+                    sau đó chọn Factory tại đây để bật nút tạo Plant.
+                  </p>
+                )}
               <form onSubmit={createDepartment} style={{ display: "flex", gap: 8 }}>
                 <input aria-label="Tên Department" placeholder="Tên Department" required value={departmentName} onChange={(event) => setDepartmentName(event.target.value)} style={styles.input} />
-                <button disabled={!selectedFactoryId} style={styles.button}>Tạo Department</button>
+                <button disabled={!selectedFactoryIsAvailable} style={styles.button}>Tạo Department</button>
               </form>
               <form onSubmit={createPlant} style={{ display: "flex", gap: 8 }}>
                 <input aria-label="Tên nhà máy" placeholder="Tên nhà máy" required value={plantName} onChange={(event) => setPlantName(event.target.value)} style={styles.input} />
-                <button disabled={!selectedFactoryId} style={styles.button}>Tạo Plant</button>
+                <button disabled={!plantName.trim() || !selectedFactoryIsAvailable} style={styles.button}>Tạo Plant</button>
               </form>
-              <label>Factory cho Department/Plant
-                <select value={selectedFactoryId} onChange={(event) => { setSelectedFactoryId(event.target.value); setSelectedDepartmentId(""); }} style={styles.input}>
-                  <option value="">Chọn Factory</option>
-                  {factories.filter((item) => !selectedOrganizationId || item.organization_id === Number(selectedOrganizationId)).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                </select>
-              </label>
               <label>Department của Plant (tùy chọn)
-                <select value={selectedDepartmentId} onChange={(event) => setSelectedDepartmentId(event.target.value)} style={styles.input}>
+                <select value={selectedDepartmentId} onChange={(event) => setSelectedDepartmentId(event.target.value)} disabled={!selectedFactoryIsAvailable} style={styles.input}>
                   <option value="">Không thuộc Department</option>
                   {departments.filter((item) => item.factory_id === Number(selectedFactoryId)).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                 </select>

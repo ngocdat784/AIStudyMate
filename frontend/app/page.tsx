@@ -29,6 +29,19 @@ type KPI = {
 type AccessiblePlant = {
   id: number;
   name: string;
+  factory_id: number | null;
+  factory_name: string | null;
+};
+
+type ExportOrganization = {
+  id: number;
+  name: string;
+};
+
+type ExportFactory = {
+  id: number;
+  organization_id: number;
+  name: string;
 };
 
 type PerformanceItem = {
@@ -235,6 +248,27 @@ type UnifiedAnalysisResult = {
   analysis_limitations: string[];
 };
 
+type DatasetClassification = {
+  domain: string;
+  domains: string[];
+  recognized_fields: string[];
+  analyses: Record<
+    string,
+    {
+      label: string;
+      ready: boolean;
+      matched_fields: string[];
+    }
+  >;
+};
+
+type AvailableDomainAnalysis = {
+  title: string;
+  summary: string;
+  metrics: Record<string, { value: number | string | null; unit: string }>;
+  limitations: string[];
+};
+
 type HardwareResult = {
   title: string;
   summary: string;
@@ -262,10 +296,85 @@ type HardwareResult = {
   anomaly_analysis: AnomalyAnalysis;
   ai_analysis: AIAnalysis;
   unified_analysis?: UnifiedAnalysisResult;
+  dataset_classification?: DatasetClassification;
+  domain_analyses?: Record<string, AvailableDomainAnalysis>;
   custom_prompt_response?: string;
   custom_prompt_error?: string;
   analysis_history_id?: number | null;
 };
+
+type ExportSectionKey =
+  | "executive_summary"
+  | "kpi_overview"
+  | "production_analysis"
+  | "quality_analysis"
+  | "supplier_analysis"
+  | "batch_analysis"
+  | "defect_analysis"
+  | "manufacturing_analytics"
+  | "machine_analysis"
+  | "material_analysis"
+  | "predictive_analysis"
+  | "dataset_classification"
+  | "ai_insights"
+  | "warnings"
+  | "recommendations";
+
+const EXPORT_SECTION_LABELS: Array<{
+  key: ExportSectionKey;
+  label: string;
+}> = [
+  { key: "executive_summary", label: "Tóm tắt và phạm vi dữ liệu" },
+  { key: "kpi_overview", label: "KPI tổng quan" },
+  { key: "production_analysis", label: "Sản xuất, sản phẩm, model, linh kiện" },
+  { key: "quality_analysis", label: "Chất lượng và chất lượng dữ liệu" },
+  { key: "supplier_analysis", label: "Nhà cung cấp" },
+  { key: "batch_analysis", label: "Lô sản xuất" },
+  { key: "defect_analysis", label: "Phân loại lỗi" },
+  { key: "manufacturing_analytics", label: "Phân tích hợp nhất" },
+  { key: "machine_analysis", label: "Máy móc" },
+  { key: "material_analysis", label: "Vật liệu" },
+  { key: "predictive_analysis", label: "Dự báo" },
+  { key: "dataset_classification", label: "Nhận diện dữ liệu" },
+  { key: "ai_insights", label: "Nhận định AI" },
+  { key: "warnings", label: "Cảnh báo và giới hạn" },
+  { key: "recommendations", label: "Khuyến nghị" },
+];
+
+function getAvailableExportSections(
+  data: HardwareResult
+): ExportSectionKey[] {
+  const sections: ExportSectionKey[] = ["executive_summary"];
+  const hasRows = (value: unknown) =>
+    Array.isArray(value) && value.length > 0;
+  if (hasRows(data.kpis)) sections.push("kpi_overview");
+  if (
+    hasRows(data.daily_production) ||
+    hasRows(data.product_performance) ||
+    hasRows(data.model_performance) ||
+    hasRows(data.component_performance)
+  ) {
+    sections.push("production_analysis");
+  }
+  if (
+    data.data_scope.has_defect_data ||
+    data.data_quality.quality_score >= 0
+  ) {
+    sections.push("quality_analysis");
+  }
+  if (hasRows(data.supplier_performance)) sections.push("supplier_analysis");
+  if (hasRows(data.batch_performance)) sections.push("batch_analysis");
+  if (hasRows(data.defect_type_analysis)) sections.push("defect_analysis");
+  if (data.unified_analysis) sections.push("manufacturing_analytics");
+  if (data.domain_analyses?.machine) sections.push("machine_analysis");
+  if (data.domain_analyses?.material) sections.push("material_analysis");
+  if (data.domain_analyses?.predictive) sections.push("predictive_analysis");
+  if (data.dataset_classification) sections.push("dataset_classification");
+  if (hasRows(data.insights) || data.ai_analysis) sections.push("ai_insights");
+  if (hasRows(data.warnings)) sections.push("warnings");
+  if (hasRows(data.recommendations)) sections.push("recommendations");
+  return sections;
+}
 
 type HardwareAnalysisJob = {
   id: string;
@@ -891,6 +1000,27 @@ export default function Home() {
   const [accessiblePlants, setAccessiblePlants] =
     useState<AccessiblePlant[]>([]);
 
+  const [exportOrganizations, setExportOrganizations] =
+    useState<ExportOrganization[]>([]);
+
+  const [exportFactories, setExportFactories] =
+    useState<ExportFactory[]>([]);
+
+  const [directExportEnabled, setDirectExportEnabled] =
+    useState(false);
+
+  const [exportOrganizationId, setExportOrganizationId] =
+    useState("");
+
+  const [exportPlantId, setExportPlantId] =
+    useState("");
+
+  const [exportScopeLoading, setExportScopeLoading] =
+    useState(true);
+
+  const [exportScopeError, setExportScopeError] =
+    useState("");
+
   const [selectedPlantId, setSelectedPlantId] =
     useState("");
 
@@ -920,6 +1050,9 @@ export default function Home() {
 
   const [exportingFormat, setExportingFormat] =
     useState<"pdf" | "xlsx" | null>(null);
+
+  const [selectedExportSections, setSelectedExportSections] =
+    useState<ExportSectionKey[]>([]);
 
   const [exportError, setExportError] =
     useState("");
@@ -988,6 +1121,12 @@ export default function Home() {
       : isAuthenticated
         ? "capability-status-ready"
         : "capability-status-auth-required";
+  const exportablePlants = accessiblePlants.filter((plant) => {
+    const factory = exportFactories.find(
+      (item) => item.id === plant.factory_id
+    );
+    return factory?.organization_id === Number(exportOrganizationId);
+  });
 
   useEffect(() => {
     function syncAuthentication() {
@@ -1004,37 +1143,74 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!hasAuthToken()) {
+    if (!isAuthenticated) {
       return;
     }
 
     let active = true;
-    apiFetch(`${API_BASE_URL}/api/monitoring/plants`, {
-      cache: "no-store",
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Không thể tải danh sách nhà máy.");
-        }
-        return (await response.json()) as AccessiblePlant[];
-      })
-      .then((plants) => {
+
+    const loadExportOptions = async () => {
+      const [organizationsResponse, factoriesResponse, plantsResponse] =
+        await Promise.all([
+          apiFetch(`${API_BASE_URL}/api/monitoring/organizations`, {
+            cache: "no-store",
+          }),
+          apiFetch(`${API_BASE_URL}/api/monitoring/factories`, {
+            cache: "no-store",
+          }),
+          apiFetch(`${API_BASE_URL}/api/monitoring/plants`, {
+            cache: "no-store",
+          }),
+        ]);
+      if (
+        !organizationsResponse.ok ||
+        !factoriesResponse.ok ||
+        !plantsResponse.ok
+      ) {
+        throw new Error("Không thể tải danh sách Organization và Plant.");
+      }
+
+      const [organizations, factories, plants] = await Promise.all([
+        organizationsResponse.json() as Promise<ExportOrganization[]>,
+        factoriesResponse.json() as Promise<ExportFactory[]>,
+        plantsResponse.json() as Promise<AccessiblePlant[]>,
+      ]);
+      const settingsResponse = await apiFetch(
+        `${API_BASE_URL}/api/reports/export-settings`,
+        { cache: "no-store" }
+      );
+      let exportEnabled = false;
+      if (settingsResponse.ok) {
+        const settings = await settingsResponse.json();
+        exportEnabled = settings.direct_export_enabled === true;
+      }
+
+      if (active) {
+        setExportOrganizations(organizations);
+        setExportFactories(factories);
+        setAccessiblePlants(plants);
+        setDirectExportEnabled(exportEnabled);
+        setExportScopeError("");
+      }
+    };
+
+    void loadExportOptions()
+      .catch((cause: Error) => {
         if (active) {
-          setAccessiblePlants(plants);
+          setExportScopeError(cause.message);
+          setPlantLoadError(cause.message);
         }
       })
-      .catch(() => {
+      .finally(() => {
         if (active) {
-          setPlantLoadError(
-            "Không thể tải danh sách nhà máy được phân quyền."
-          );
+          setExportScopeLoading(false);
         }
       });
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [isAuthenticated]);
 
   // --------------------------------
   // File
@@ -1454,6 +1630,7 @@ export default function Home() {
 
       const data = job.result_data;
       setResult(data);
+      setSelectedExportSections(getAvailableExportSections(data));
       setAnalysisProgress(100);
       setAnalysisStage("completed");
       const availableModels = Array.from(
@@ -1589,7 +1766,105 @@ export default function Home() {
     setExportError("");
 
     try {
-      window.localStorage.setItem("pending-governed-report", JSON.stringify(result));
+      if (!selectedExportSections.length) {
+        throw new Error("Chọn ít nhất một mục để đưa vào báo cáo.");
+      }
+
+      let directExportEnabled = false;
+      let settingsResponse: Response | null = null;
+      try {
+        settingsResponse = await apiFetch(
+          `${API_BASE_URL}/api/reports/export-settings`,
+          { cache: "no-store" }
+        );
+      } catch (error) {
+        console.warn(
+          "Could not read report export settings; using the governed report flow.",
+          error
+        );
+      }
+
+      if (settingsResponse?.status === 401 || settingsResponse?.status === 403) {
+        throw new Error("Bạn cần đăng nhập để xuất báo cáo.");
+      }
+      if (settingsResponse?.ok) {
+        try {
+          const exportSettings = await settingsResponse.json();
+          directExportEnabled =
+            exportSettings.direct_export_enabled === true;
+          setDirectExportEnabled(directExportEnabled);
+        } catch (error) {
+          console.warn(
+            "Could not parse report export settings; using the governed report flow.",
+            error
+          );
+        }
+      } else if (settingsResponse) {
+        console.warn(
+          `Could not read report export settings (HTTP ${settingsResponse.status}); using the governed report flow.`
+        );
+      }
+
+      if (directExportEnabled) {
+        const selectedOrganization = exportOrganizations.find(
+          (organization) =>
+            String(organization.id) === exportOrganizationId
+        );
+        const selectedPlant = accessiblePlants.find(
+          (plant) => String(plant.id) === exportPlantId
+        );
+        const selectedFactory = selectedPlant
+          ? exportFactories.find(
+              (factory) => factory.id === selectedPlant.factory_id
+            )
+          : undefined;
+        if (
+          !selectedOrganization ||
+          !selectedPlant ||
+          !selectedFactory ||
+          selectedFactory.organization_id !== selectedOrganization.id
+        ) {
+          throw new Error(
+            "Chọn Organization và Plant hợp lệ trước khi xuất trực tiếp."
+          );
+        }
+
+        const response = await apiFetch(
+          `${API_BASE_URL}/api/hardware/export`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              format,
+              sections: selectedExportSections,
+              organization_id: selectedOrganization.id,
+              plant_id: selectedPlant.id,
+              payload: result,
+            }),
+          }
+        );
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => ({}));
+          throw new Error(
+            errorBody.detail ?? "Không thể xuất báo cáo trực tiếp."
+          );
+        }
+        const url = URL.createObjectURL(await response.blob());
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `hardware-analysis.${format}`;
+        anchor.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        return;
+      }
+
+      window.localStorage.setItem(
+        "pending-governed-report",
+        JSON.stringify({
+          ...result,
+          export_sections: selectedExportSections,
+        })
+      );
       router.push("/reports?create=1");
     } catch (error) {
       console.error("HardwareAI report export failed:", error);
@@ -2998,20 +3273,226 @@ export default function Home() {
               </section>
             )}
 
+            {result.dataset_classification && (
+              <section className="dashboard-card" id="dataset-classification">
+                <div className="dashboard-card-header">
+                  <div>
+                    <span>00</span>
+                    <h3>Nhận diện dữ liệu</h3>
+                  </div>
+                  <p>
+                    {result.dataset_classification.domain === "unrecognized"
+                      ? "Chưa xác định lĩnh vực"
+                      : result.dataset_classification.domains.join(" · ")}
+                  </p>
+                </div>
+                <p>
+                  Các trường được nhận diện:{" "}
+                  {result.dataset_classification.recognized_fields.join(", ") ||
+                    "chưa có"}
+                </p>
+                <ul>
+                  {Object.entries(
+                    result.dataset_classification.analyses
+                  ).map(([name, analysis]) => (
+                    <li key={name}>
+                      {analysis.label}:{" "}
+                      {analysis.ready
+                        ? `sẵn sàng (${analysis.matched_fields.join(", ")})`
+                        : "chưa đủ dữ liệu"}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {result.domain_analyses &&
+              Object.entries(result.domain_analyses).map(
+                ([domain, analysis]) => (
+                  <section
+                    className="dashboard-card"
+                    id={`domain-analysis-${domain}`}
+                    key={domain}
+                  >
+                    <div className="dashboard-card-header">
+                      <div>
+                        <span>+</span>
+                        <h3>{analysis.title}</h3>
+                      </div>
+                      <p>
+                        {result.dataset_classification?.analyses[domain]
+                          ?.matched_fields.join(", ")}
+                      </p>
+                    </div>
+                    <p>{analysis.summary}</p>
+                    {Object.keys(analysis.metrics).length > 0 && (
+                      <div className="kpi-grid">
+                        {Object.entries(analysis.metrics).map(
+                          ([name, metric]) => (
+                            <div className="kpi-card" key={name}>
+                              <div className="kpi-label">{name}</div>
+                              <div className="kpi-value">
+                                {typeof metric.value === "number"
+                                  ? metric.value.toLocaleString("vi-VN")
+                                  : metric.value}
+                              </div>
+                              <span className="kpi-unit">{metric.unit}</span>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    )}
+                    {analysis.limitations.length > 0 && (
+                      <ul>
+                        {analysis.limitations.slice(0, 5).map((limitation) => (
+                          <li key={limitation}>{limitation}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                )
+              )}
+
             <section className="export-report-card">
               <div className="export-report-info">
-                <h3>Export Report</h3>
+                <h3>Xuất báo cáo phân tích</h3>
                 <p>
-                  Xuất báo cáo từ kết quả phân tích hiện tại, không chạy lại
-                  phân tích hoặc AI.
+                  Chọn nội dung muốn đưa vào PDF/Excel. Mặc định báo cáo đi qua
+                  bước duyệt; Admin có thể bật xuất trực tiếp để kiểm thử.
                 </p>
               </div>
+              {directExportEnabled && (
+                <fieldset className="export-report-scope">
+                  <legend>Phạm vi báo cáo trực tiếp</legend>
+                  {exportScopeLoading && (
+                    <p>Đang tải Organization và Plant...</p>
+                  )}
+                  {exportScopeError && (
+                    <p className="export-report-scope-error" role="alert">
+                      {exportScopeError}
+                    </p>
+                  )}
+                  {!exportScopeLoading &&
+                    !exportScopeError &&
+                    (!exportOrganizations.length || !accessiblePlants.length) && (
+                      <p>
+                        Chưa có Organization hoặc Plant được cấp quyền. Hãy{" "}
+                        <Link href="/monitoring">
+                          tạo phạm vi trong mục Giám sát
+                        </Link>{" "}
+                        hoặc nhờ Admin cấp quyền.
+                      </p>
+                    )}
+                  <div className="export-report-scope-fields">
+                    <label>
+                      Organization
+                      <select
+                        value={exportOrganizationId}
+                        onChange={(event) => {
+                          setExportOrganizationId(event.target.value);
+                          setExportPlantId("");
+                        }}
+                        disabled={
+                          exportScopeLoading ||
+                          Boolean(exportScopeError) ||
+                          exportOrganizations.length === 0
+                        }
+                      >
+                        <option value="">Chọn Organization</option>
+                        {exportOrganizations.map((organization) => (
+                          <option
+                            key={organization.id}
+                            value={organization.id}
+                          >
+                            {organization.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Plant
+                      <select
+                        value={exportPlantId}
+                        onChange={(event) =>
+                          setExportPlantId(event.target.value)
+                        }
+                        disabled={
+                          exportScopeLoading ||
+                          Boolean(exportScopeError) ||
+                          !exportOrganizationId ||
+                          exportablePlants.length === 0
+                        }
+                      >
+                        <option value="">Chọn Plant</option>
+                        {exportablePlants.map((plant) => (
+                          <option key={plant.id} value={plant.id}>
+                            {plant.name}
+                            {plant.factory_name
+                              ? ` — ${plant.factory_name}`
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  {exportOrganizationId &&
+                    !exportScopeLoading &&
+                    !exportScopeError &&
+                    !exportablePlants.length && (
+                      <p>
+                        Organization này chưa có Plant được cấp quyền.
+                      </p>
+                    )}
+                </fieldset>
+              )}
+              <fieldset className="export-report-sections">
+                <legend>
+                  Mục đưa vào file ({selectedExportSections.length} đã chọn)
+                </legend>
+                <div className="export-report-section-options">
+                  {result &&
+                    getAvailableExportSections(result).map((sectionKey) => {
+                      const section = EXPORT_SECTION_LABELS.find(
+                        (item) => item.key === sectionKey
+                      );
+                      if (!section) return null;
+                      return (
+                        <label key={section.key}>
+                          <input
+                            type="checkbox"
+                            checked={selectedExportSections.includes(
+                              section.key
+                            )}
+                            onChange={(event) => {
+                              setSelectedExportSections((current) =>
+                                event.target.checked
+                                  ? [...current, section.key]
+                                  : current.filter(
+                                      (key) => key !== section.key
+                                    )
+                              );
+                            }}
+                          />
+                          {section.label}
+                        </label>
+                      );
+                    })}
+                </div>
+              </fieldset>
               <div className="export-report-actions">
                 <button
                   type="button"
                   className="export-report-button"
                   onClick={() => handleExportReport("pdf")}
-                  disabled={exportingFormat !== null}
+                  disabled={
+                    exportingFormat !== null ||
+                    selectedExportSections.length === 0 ||
+                    (directExportEnabled &&
+                      (!exportOrganizationId ||
+                        !exportPlantId ||
+                        exportScopeLoading ||
+                        Boolean(exportScopeError)))
+                  }
                 >
                   {exportingFormat === "pdf"
                     ? "Đang tạo PDF..."
@@ -3021,7 +3502,15 @@ export default function Home() {
                   type="button"
                   className="export-report-button"
                   onClick={() => handleExportReport("xlsx")}
-                  disabled={exportingFormat !== null}
+                  disabled={
+                    exportingFormat !== null ||
+                    selectedExportSections.length === 0 ||
+                    (directExportEnabled &&
+                      (!exportOrganizationId ||
+                        !exportPlantId ||
+                        exportScopeLoading ||
+                        Boolean(exportScopeError)))
+                  }
                 >
                   {exportingFormat === "xlsx"
                     ? "Đang tạo Excel..."

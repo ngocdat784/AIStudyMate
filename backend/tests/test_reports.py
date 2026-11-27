@@ -1,7 +1,9 @@
 import unittest
+from io import BytesIO
 from typing import Iterator
 
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -133,6 +135,80 @@ class GovernedReportAPITests(unittest.TestCase):
             session.add(history)
             session.commit()
             return history.id
+
+    def test_direct_export_is_disabled_by_default_and_admin_toggle_is_required(self):
+        settings_response = self.client.get(
+            "/api/reports/export-settings",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(settings_response.status_code, 200)
+        self.assertFalse(settings_response.json()["direct_export_enabled"])
+
+        payload = {
+            "format": "xlsx",
+            "sections": ["production_analysis"],
+            "organization_id": self.organization_id,
+            "plant_id": self.plant_id,
+            "payload": {
+                "title": "Production results",
+                "daily_production": [{"date": "2026-10-01", "production": 1200}],
+            },
+        }
+        disabled = self.client.post(
+            "/api/hardware/export",
+            headers=self.admin_headers,
+            json=payload,
+        )
+        self.assertEqual(disabled.status_code, 403, disabled.text)
+
+        _operator_id, operator_token = self._create_operator()
+        denied_update = self.client.put(
+            "/api/reports/export-settings",
+            headers={"Authorization": f"Bearer {operator_token}"},
+            json={"direct_export_enabled": True},
+        )
+        self.assertEqual(denied_update.status_code, 403, denied_update.text)
+
+        enabled = self.client.put(
+            "/api/reports/export-settings",
+            headers=self.admin_headers,
+            json={"direct_export_enabled": True},
+        )
+        self.assertEqual(
+            enabled.status_code,
+            200,
+            enabled.text,
+        )
+        self.assertTrue(enabled.json()["direct_export_enabled"])
+
+        invalid_scope = self.client.post(
+            "/api/hardware/export",
+            headers=self.admin_headers,
+            json={**payload, "organization_id": self.organization_id + 999},
+        )
+        self.assertEqual(invalid_scope.status_code, 422, invalid_scope.text)
+
+        exported = self.client.post(
+            "/api/hardware/export",
+            headers=self.admin_headers,
+            json=payload,
+        )
+        self.assertEqual(exported.status_code, 200, exported.text)
+        workbook = load_workbook(BytesIO(exported.content), data_only=True)
+        self.assertEqual(workbook.sheetnames, ["Production Analysis"])
+        self.assertEqual(workbook["Production Analysis"]["A2"].value, "Organization")
+        self.assertEqual(
+            workbook["Production Analysis"]["B2"].value,
+            "Organization First",
+        )
+        self.assertEqual(workbook["Production Analysis"]["F2"].value, "Plant First")
+
+        disabled_again = self.client.put(
+            "/api/reports/export-settings",
+            headers=self.admin_headers,
+            json={"direct_export_enabled": False},
+        )
+        self.assertEqual(disabled_again.status_code, 200, disabled_again.text)
 
     def _create_report(
         self,

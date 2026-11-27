@@ -3,6 +3,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
@@ -130,6 +131,57 @@ class HardwareAnalysisJobTests(unittest.TestCase):
         list_response = self.client.get("/api/hardware/jobs")
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(list_response.json()["pagination"]["total"], 1)
+
+    def test_job_submission_queues_without_parsing_the_file(self):
+        with patch(
+            "app.routes.hardware._parse_hardware_content",
+            side_effect=AssertionError("Parsing should run in the worker"),
+        ):
+            response = self._submit_csv()
+
+        self.assertEqual(response.status_code, 202, response.text)
+
+    def test_job_readiness_error_is_reported_by_the_worker(self):
+        response = self.client.post(
+            "/api/hardware/jobs",
+            files={
+                "file": (
+                    "date-only.csv",
+                    b"Date\n2026-03-01\n",
+                    "text/csv",
+                )
+            },
+            data={"custom_prompt": ""},
+        )
+
+        self.assertEqual(response.status_code, 202, response.text)
+        job_id = response.json()["id"]
+        with Session(self.engine) as db:
+            job = db.get(HardwareAnalysisJob, job_id)
+            assert job is not None
+            job.status = "running"
+            job.attempt_count = 1
+            db.commit()
+
+        session_factory = lambda: Session(self.engine)
+        with (
+            patch("app.routes.hardware.SessionLocal", session_factory),
+            patch(
+                "app.services.hardware_analysis_jobs.SessionLocal",
+                session_factory,
+            ),
+        ):
+            from app.routes.hardware import process_hardware_analysis_job
+
+            process_hardware_analysis_job(job_id)
+
+        with Session(self.engine) as db:
+            job = db.get(HardwareAnalysisJob, job_id)
+            assert job is not None
+            self.assertEqual(job.status, "failed")
+            self.assertIn("File chưa đủ dữ liệu", job.error_message or "")
+            self.assertIn("Đã nhận diện: Date.", job.error_message or "")
+            self.assertIsNone(job.input_file)
 
     def test_job_status_is_private_to_its_owner(self):
         job_response = self._submit_csv()
@@ -394,6 +446,66 @@ class HardwareAnalysisJobTests(unittest.TestCase):
             self.assertEqual(job.status, "failed")
             self.assertIsNone(job.input_file)
             self.assertIsNotNone(job.completed_at)
+
+    def test_input_error_fails_immediately_with_backend_message(self):
+        submitted = self._submit_csv()
+        self.assertEqual(submitted.status_code, 202, submitted.text)
+        job_id = submitted.json()["id"]
+        with Session(self.engine) as db:
+            job = db.get(HardwareAnalysisJob, job_id)
+            assert job is not None
+            job.status = "running"
+            job.attempt_count = 1
+            db.commit()
+
+        session_factory = lambda: Session(self.engine)
+        with patch(
+            "app.services.hardware_analysis_jobs.SessionLocal",
+            session_factory,
+        ):
+            fail_hardware_analysis_job(
+                job_id,
+                ValueError("File chưa đủ dữ liệu cho phân tích sản xuất."),
+            )
+
+        with Session(self.engine) as db:
+            job = db.get(HardwareAnalysisJob, job_id)
+            assert job is not None
+            self.assertEqual(job.status, "failed")
+            self.assertEqual(
+                job.error_message,
+                "File chưa đủ dữ liệu cho phân tích sản xuất.",
+            )
+            self.assertIsNone(job.input_file)
+            self.assertEqual(job.attempt_count, 1)
+
+    def test_http_input_error_fails_immediately_with_backend_detail(self):
+        submitted = self._submit_csv()
+        self.assertEqual(submitted.status_code, 202, submitted.text)
+        job_id = submitted.json()["id"]
+        with Session(self.engine) as db:
+            job = db.get(HardwareAnalysisJob, job_id)
+            assert job is not None
+            job.status = "running"
+            job.attempt_count = 1
+            db.commit()
+
+        session_factory = lambda: Session(self.engine)
+        with patch(
+            "app.services.hardware_analysis_jobs.SessionLocal",
+            session_factory,
+        ):
+            fail_hardware_analysis_job(
+                job_id,
+                HTTPException(status_code=413, detail="PDF quá lớn."),
+            )
+
+        with Session(self.engine) as db:
+            job = db.get(HardwareAnalysisJob, job_id)
+            assert job is not None
+            self.assertEqual(job.status, "failed")
+            self.assertEqual(job.error_message, "PDF quá lớn.")
+            self.assertIsNone(job.input_file)
 
     def test_worker_claims_ready_jobs_and_tracks_attempts(self):
         first = self._submit_csv()

@@ -9,6 +9,10 @@ from app.database.connection import get_db
 from app.models.monitoring import AlertUser
 from app.routes.hardware import _read_hardware_upload
 from app.services.analysis_history_service import create_analysis_history
+from app.services.analysis_readiness_service import (
+    classify_analysis_dataset,
+    ensure_analysis_ready,
+)
 from app.services.api_rate_limit import rate_limit_dependency
 from app.services.machine_intelligence_service import analyze_machine_intelligence
 from app.services.monitoring_auth import get_current_user, require_roles
@@ -45,6 +49,8 @@ async def analyze_machine_file(
 ) -> dict[str, Any]:
     try:
         dataframe = await _read_hardware_upload(file)
+        classification = classify_analysis_dataset(dataframe)
+        ensure_analysis_ready(classification, "machine")
         result = await run_in_threadpool(
             analyze_machine_intelligence,
             dataframe,
@@ -53,6 +59,7 @@ async def analyze_machine_file(
             duration_unit=duration_unit,
             cycle_time_unit=cycle_time_unit,
         )
+        result["dataset_classification"] = classification
     except HTTPException:
         raise
     except ValueError as error:

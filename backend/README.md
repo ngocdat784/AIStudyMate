@@ -98,6 +98,9 @@ remains available for compatible clients; new clients should submit to
 `POST /api/hardware/jobs` and poll `GET /api/hardware/jobs/{job_id}`. Jobs are
 visible only to their owner unless the caller is an administrator. The
 paginated `GET /api/hardware/jobs` endpoint lists the caller's recent jobs.
+File parsing, document table extraction, and data-readiness validation run in
+the worker after upload, so input errors are reported in the job status rather
+than as an immediate upload response.
 
 The queue uses PostgreSQL row locks and `SKIP LOCKED`; no Redis or separate
 message broker is required. Uploads are limited to 10 MB, the default global

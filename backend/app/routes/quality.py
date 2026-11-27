@@ -13,6 +13,10 @@ from app.models import AnalysisHistory
 from app.models.monitoring import AlertUser
 from app.routes.hardware import _read_hardware_upload
 from app.services.analysis_history_service import create_analysis_history
+from app.services.analysis_readiness_service import (
+    classify_analysis_dataset,
+    ensure_analysis_ready,
+)
 from app.services.api_rate_limit import rate_limit_dependency
 from app.services.monitoring_auth import get_current_user, require_roles
 from app.services.quality_intelligence_service import (
@@ -75,6 +79,11 @@ async def analyze_quality_file(
     try:
         dataframe = await _read_hardware_upload(file)
         mapping = _parse_column_mapping(column_mapping)
+        classification = classify_analysis_dataset(
+            dataframe,
+            column_mapping=mapping,
+        )
+        ensure_analysis_ready(classification, "quality")
         result = await run_in_threadpool(
             analyze_quality_intelligence,
             dataframe,
@@ -85,6 +94,7 @@ async def analyze_quality_file(
             column_mapping=mapping,
             include_ai=include_ai,
         )
+        result["dataset_classification"] = classification
     except HTTPException:
         raise
     except ValueError as error:

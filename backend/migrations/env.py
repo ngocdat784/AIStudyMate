@@ -25,6 +25,7 @@ from app.models import (  # noqa: F401
     AlertUserDepartment,
     AlertUserFactory,
     AlertUser,
+    ApplicationSetting,
     AlertUserPlant,
     AnalysisHistory,
     ApiRateLimitBucket,

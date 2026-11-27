@@ -51,6 +51,19 @@ class AlertUser(Base):
     )
 
 
+class ApplicationSetting(Base):
+    __tablename__ = "application_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[dict[str, bool]] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class AuthSession(Base):
     __tablename__ = "auth_sessions"
     __table_args__ = (

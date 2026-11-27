@@ -61,6 +61,7 @@ def _correlation(left: list[float], right: list[float]) -> float | None:
 
 def _daily_series(
     records: list[ManufacturingRecord],
+    available_fields: set[str],
 ) -> list[dict[str, Any]]:
     grouped: dict[date, list[ManufacturingRecord]] = defaultdict(list)
     for record in records:
@@ -69,7 +70,11 @@ def _daily_series(
 
     periods: list[dict[str, Any]] = []
     for period, period_records in sorted(grouped.items()):
-        production = sum(record.production for record in period_records)
+        production = (
+            sum(record.production for record in period_records)
+            if "Production" in available_fields
+            else None
+        )
         defect_records = [
             record for record in period_records if record.defects is not None
         ]
@@ -81,7 +86,12 @@ def _daily_series(
         paired = [
             record
             for record in period_records
-            if record.defects is not None and record.production > 0
+            if (
+                "Production" in available_fields
+                and "Defects" in available_fields
+                and record.defects is not None
+                and record.production > 0
+            )
         ]
         paired_production = sum(record.production for record in paired)
         paired_defects = sum(record.defects or 0 for record in paired)
@@ -89,16 +99,27 @@ def _daily_series(
             {
                 "period_start": period.isoformat(),
                 "production": _rounded(production),
-                "defects": _rounded(
-                    sum(record.defects or 0 for record in defect_records)
+                "defects": (
+                    _rounded(
+                        sum(record.defects or 0 for record in defect_records)
+                    )
+                    if "Defects" in available_fields
+                    else None
                 ),
                 "defect_rate": (
                     _rounded(paired_defects / paired_production * 100)
                     if paired_production > 0
                     else None
                 ),
-                "downtime_minutes": _rounded(
-                    sum(record.downtime_minutes or 0 for record in downtime_records)
+                "downtime_minutes": (
+                    _rounded(
+                        sum(
+                            record.downtime_minutes or 0
+                            for record in downtime_records
+                        )
+                    )
+                    if "Downtime" in available_fields
+                    else None
                 ),
                 "record_count": len(period_records),
             }
@@ -126,6 +147,7 @@ def analyze_manufacturing_dataset(
     modules: list[str] | None = None,
 ) -> dict[str, Any]:
     records = dataset.records
+    available_fields = set(dataset.column_mapping.values())
     active_modules = set(
         modules
         if modules is not None
@@ -172,7 +194,16 @@ def analyze_manufacturing_dataset(
 
     metric_totals: dict[str, dict[str, Any]] = {}
     for record_field, metric_name, unit in _METRICS:
-        values = _metric_values(records, record_field)
+        field_available = {
+            "production": "Production",
+            "defects": "Defects",
+            "downtime_minutes": "Downtime",
+        }[record_field] in available_fields
+        values = (
+            _metric_values(records, record_field)
+            if field_available
+            else []
+        )
         value = _rounded(sum(values)) if values else None
         evidence_id = (
             add_evidence(
@@ -240,6 +271,13 @@ def analyze_manufacturing_dataset(
     statistics_findings: list[dict[str, Any]] = []
     if "statistical_analysis" in active_modules:
         for record_field, metric_name, unit in _METRICS:
+            target_field = {
+                "production": "Production",
+                "defects": "Defects",
+                "downtime_minutes": "Downtime",
+            }[record_field]
+            if target_field not in available_fields:
+                continue
             values = _metric_values(records, record_field)
             if not values:
                 continue
@@ -278,6 +316,16 @@ def analyze_manufacturing_dataset(
                 ("defects", "defects"),
                 ("downtime", "downtime_minutes"),
             )[left_index + 1 :]:
+                canonical_fields = {
+                    "production": "Production",
+                    "defects": "Defects",
+                    "downtime": "Downtime",
+                }
+                if (
+                    canonical_fields[left_name] not in available_fields
+                    or canonical_fields[right_name] not in available_fields
+                ):
+                    continue
                 pairs = [
                     (float(getattr(record, left_field)), float(getattr(record, right_field)))
                     for record in records
@@ -312,7 +360,7 @@ def analyze_manufacturing_dataset(
                 )
     statistics_findings.extend(correlations)
 
-    time_series = _daily_series(records)
+    time_series = _daily_series(records, available_fields)
     detected_anomalies: list[dict[str, Any]] = []
     if "anomaly_detection" in active_modules:
         for metric_name in ("production", "defects", "defect_rate", "downtime_minutes"):
@@ -372,7 +420,10 @@ def analyze_manufacturing_dataset(
             )
 
     bottleneck_candidates: list[dict[str, Any]] = []
-    if "bottleneck_screening" in active_modules:
+    if (
+        "bottleneck_screening" in active_modules
+        and {"Production", "Downtime"}.issubset(available_fields)
+    ):
         for dimension in ("line", "machine", "process"):
             grouped: dict[str, list[ManufacturingRecord]] = defaultdict(list)
             for record in records:
@@ -461,6 +512,10 @@ def analyze_manufacturing_dataset(
         else "low"
     )
     limitations = []
+    if "Production" not in available_fields:
+        limitations.append(
+            "Không có cột Production; KPI sản lượng và tỷ lệ lỗi không được tính."
+        )
     if (
         active_modules.intersection({"trend_analysis", "anomaly_detection"})
         and not any(record.timestamp is not None for record in records)
@@ -493,11 +548,11 @@ def analyze_manufacturing_dataset(
 
     total_production = metric_totals["production"]["value"]
     executive_summary = (
-        f"Đã phân tích {len(records)} bản ghi sản xuất; "
+        f"Đã phân tích {len(records)} bản ghi; "
         f"tổng sản lượng là {total_production:g} "
         f"{dataset.units['production']}."
         if total_production is not None
-        else f"Đã phân tích {len(records)} bản ghi sản xuất."
+        else f"Đã phân tích {len(records)} bản ghi."
     )
     if detected_anomalies:
         executive_summary += (

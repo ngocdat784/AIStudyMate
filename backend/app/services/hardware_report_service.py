@@ -37,10 +37,16 @@ REPORT_SECTIONS = (
     ("Supplier Analysis", "supplier_analysis"),
     ("Batch Analysis", "batch_analysis"),
     ("Defect Analysis", "defect_analysis"),
+    ("Manufacturing Analytics", "manufacturing_analytics"),
+    ("Machine Analysis", "machine_analysis"),
+    ("Material Analysis", "material_analysis"),
+    ("Predictive Analysis", "predictive_analysis"),
+    ("Dataset Classification", "dataset_classification"),
     ("AI Insights", "ai_insights"),
     ("Warnings", "warnings"),
     ("Recommendations", "recommendations"),
 )
+_REPORT_SECTION_KEYS = {key for _, key in REPORT_SECTIONS}
 _PDF_FONT_LOCK = Lock()
 
 
@@ -187,6 +193,55 @@ def _section_blocks(
                 ],
             ),
         ]
+    if section_key == "manufacturing_analytics":
+        unified = payload.get("unified_analysis")
+        return [
+            (
+                "Unified Analysis",
+                [
+                    {"Field": key, "Value": value}
+                    for key, value in _flatten_mapping(unified or {})
+                ],
+            )
+        ]
+    if section_key in {
+        "machine_analysis",
+        "material_analysis",
+        "predictive_analysis",
+    }:
+        analysis_key = {
+            "machine_analysis": "machine",
+            "material_analysis": "material",
+            "predictive_analysis": "predictive",
+        }[section_key]
+        analysis = payload.get("domain_analyses", {}).get(analysis_key, {})
+        records = [
+            {"Metric": key, **value}
+            for key, value in analysis.get("metrics", {}).items()
+            if isinstance(value, dict)
+        ]
+        records.extend(
+            {"Limitation": item}
+            for item in analysis.get("limitations", [])
+        )
+        return [
+            (
+                analysis.get("title", analysis_key.replace("_", " ").title()),
+                records,
+            )
+        ]
+    if section_key == "dataset_classification":
+        return [
+            (
+                "Recognized Dataset",
+                [
+                    {"Field": key, "Value": value}
+                    for key, value in _flatten_mapping(
+                        payload.get("dataset_classification", {})
+                    )
+                ],
+            )
+        ]
     if section_key == "ai_insights":
         insight_items = payload.get("insights")
         rows = (
@@ -237,17 +292,66 @@ def _xlsx_cell_value(value: Any) -> Any:
     return safe
 
 
-def build_hardware_xlsx(payload: dict[str, Any]) -> bytes:
+def _selected_report_sections(
+    payload: dict[str, Any],
+    selected_sections: list[str] | None,
+) -> tuple[tuple[str, str], ...]:
+    requested = selected_sections
+    if requested is None:
+        payload_sections = payload.get("export_sections")
+        requested = payload_sections if isinstance(payload_sections, list) else None
+    if requested is None:
+        return REPORT_SECTIONS
+    if not requested or any(
+        not isinstance(section, str) or section not in _REPORT_SECTION_KEYS
+        for section in requested
+    ):
+        raise ValueError("Danh sách mục xuất không hợp lệ hoặc đang trống.")
+    selected = set(requested)
+    return tuple(
+        (title, key)
+        for title, key in REPORT_SECTIONS
+        if key in selected
+    )
+
+
+def build_hardware_xlsx(
+    payload: dict[str, Any],
+    selected_sections: list[str] | None = None,
+) -> bytes:
     workbook = Workbook()
     workbook.remove(workbook.active)
 
-    for section_title, section_key in REPORT_SECTIONS:
+    for section_title, section_key in _selected_report_sections(
+        payload,
+        selected_sections,
+    ):
         worksheet = workbook.create_sheet(section_title)
         worksheet.sheet_view.showGridLines = False
         worksheet["A1"] = section_title
         worksheet["A1"].font = Font(bold=True, size=16, color="FFFFFF")
         worksheet["A1"].fill = PatternFill("solid", fgColor="17365D")
         worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=4)
+
+        report_scope = payload.get("report_scope")
+        if isinstance(report_scope, dict):
+            scope_fields = (
+                ("Organization", "organization"),
+                ("Factory", "factory"),
+                ("Plant", "plant"),
+            )
+            for index, (label, key) in enumerate(scope_fields):
+                label_cell = worksheet.cell(
+                    row=2,
+                    column=index * 2 + 1,
+                    value=label,
+                )
+                label_cell.font = Font(bold=True, color="17365D")
+                worksheet.cell(
+                    row=2,
+                    column=index * 2 + 2,
+                    value=_xlsx_cell_value(report_scope.get(key)),
+                )
 
         current_row = 3
         table_number = 0
@@ -367,7 +471,10 @@ def _pdf_paragraph(value: Any, style: ParagraphStyle) -> Paragraph:
     return Paragraph(text or "—", style)
 
 
-def build_hardware_pdf(payload: dict[str, Any]) -> bytes:
+def build_hardware_pdf(
+    payload: dict[str, Any],
+    selected_sections: list[str] | None = None,
+) -> bytes:
     regular_font, bold_font = _pdf_font_names()
     output = BytesIO()
     document = SimpleDocTemplate(
@@ -440,8 +547,28 @@ def build_hardware_pdf(payload: dict[str, Any]) -> bytes:
         ),
         Spacer(1, 4 * mm),
     ]
+    report_scope = payload.get("report_scope")
+    if isinstance(report_scope, dict):
+        scope_labels = (
+            ("Organization", "organization"),
+            ("Factory", "factory"),
+            ("Plant", "plant"),
+        )
+        scope_text = " · ".join(
+            f"<b>{label}:</b> {escape(_display_value(report_scope.get(key)))}"
+            for label, key in scope_labels
+        )
+        story.extend(
+            [
+                Paragraph(scope_text, cell_style),
+                Spacer(1, 3 * mm),
+            ]
+        )
 
-    for section_title, section_key in REPORT_SECTIONS:
+    for section_title, section_key in _selected_report_sections(
+        payload,
+        selected_sections,
+    ):
         story.append(Paragraph(escape(section_title), section_style))
         blocks = _section_blocks(payload, section_key)
         for block_title, records in blocks:

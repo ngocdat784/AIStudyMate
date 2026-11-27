@@ -59,6 +59,8 @@ export default function ReportsPage() {
   const [reviewReason, setReviewReason] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [directExportEnabled, setDirectExportEnabled] = useState(false);
+  const [savingExportSetting, setSavingExportSetting] = useState(false);
 
   const request = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const response = await apiFetch(`${API_URL}${path}`, {
@@ -77,13 +79,14 @@ export default function ReportsPage() {
   }, []);
 
   const load = useCallback(async () => {
-    const [currentUser, organizationData, factoryData, plantData, reportData, historyData] = await Promise.all([
+    const [currentUser, organizationData, factoryData, plantData, reportData, historyData, exportSettings] = await Promise.all([
       request<User>("/api/monitoring/auth/me"),
       request<Organization[]>("/api/monitoring/organizations"),
       request<Factory[]>("/api/monitoring/factories"),
       request<Plant[]>("/api/monitoring/plants"),
       request<Report[]>("/api/reports"),
       request<{ items: HistoryItem[] }>("/api/history?page=1&page_size=100"),
+      request<{ direct_export_enabled: boolean }>("/api/reports/export-settings"),
     ]);
     setUser(currentUser);
     setOrganizations(organizationData);
@@ -91,6 +94,7 @@ export default function ReportsPage() {
     setPlants(plantData);
     setReports(reportData);
     setHistory(historyData.items);
+    setDirectExportEnabled(exportSettings.direct_export_enabled);
     setSourceHistoryId((existing) => existing || String(historyData.items[0]?.id ?? ""));
     setOrganizationId((existing) => existing || String(organizationData[0]?.id ?? ""));
   }, [request]);
@@ -110,6 +114,33 @@ export default function ReportsPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  async function saveExportSetting() {
+    setSavingExportSetting(true);
+    setError("");
+    setMessage("");
+    try {
+      const saved = await request<{ direct_export_enabled: boolean }>(
+        "/api/reports/export-settings",
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            direct_export_enabled: directExportEnabled,
+          }),
+        },
+      );
+      setDirectExportEnabled(saved.direct_export_enabled);
+      setMessage(
+        saved.direct_export_enabled
+          ? "Đã bật xuất trực tiếp để kiểm thử. Báo cáo không qua bước duyệt khi tải từ trang phân tích."
+          : "Đã tắt xuất trực tiếp. Báo cáo cần được duyệt và phát hành trước khi tải.",
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Không thể lưu cài đặt.");
+    } finally {
+      setSavingExportSetting(false);
+    }
+  }
 
   async function createReport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -228,6 +259,34 @@ export default function ReportsPage() {
       <p>Báo cáo được lưu thành phiên bản bất biến. Chỉ Admin được duyệt và phát hành.</p>
       {error && <p role="alert" style={{ color: "#b42318" }}>{error}</p>}
       {message && <p role="status" style={{ color: "#126b3a" }}>{message}</p>}
+      {isAdmin && (
+        <section className="reports-export-setting">
+          <div>
+            <h2>Chế độ xuất khi kiểm thử</h2>
+            <p>
+              Mặc định, báo cáo cần được duyệt và phát hành. Bật tùy chọn này
+              để admin/operator có thể tải trực tiếp sau phân tích.
+            </p>
+          </div>
+          <label>
+            <input
+              type="checkbox"
+              checked={directExportEnabled}
+              onChange={(event) =>
+                setDirectExportEnabled(event.target.checked)
+              }
+            />
+            Cho phép xuất trực tiếp (test)
+          </label>
+          <button
+            type="button"
+            onClick={() => void saveExportSetting()}
+            disabled={savingExportSetting}
+          >
+            {savingExportSetting ? "Đang lưu..." : "Lưu cài đặt"}
+          </button>
+        </section>
+      )}
 
       <section style={{ display: "grid", gridTemplateColumns: "minmax(250px, 1fr) 2fr", gap: 20 }}>
         <aside>

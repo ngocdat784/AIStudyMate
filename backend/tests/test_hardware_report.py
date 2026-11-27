@@ -2,11 +2,9 @@ import unittest
 from io import BytesIO
 from zipfile import ZipFile
 
-from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 from pypdf import PdfReader
 
-from app.main import app
 from app.services.hardware_report_service import (
     build_hardware_pdf,
     build_hardware_xlsx,
@@ -63,7 +61,7 @@ SAMPLE_ANALYSIS = {
 
 
 class HardwareReportServiceTests(unittest.TestCase):
-    def test_xlsx_contains_ten_report_sheets_and_analysis_data(self):
+    def test_xlsx_contains_all_report_sheets_and_analysis_data(self):
         workbook_bytes = build_hardware_xlsx(SAMPLE_ANALYSIS)
         workbook = load_workbook(BytesIO(workbook_bytes), data_only=True)
 
@@ -77,6 +75,11 @@ class HardwareReportServiceTests(unittest.TestCase):
                 "Supplier Analysis",
                 "Batch Analysis",
                 "Defect Analysis",
+                "Manufacturing Analytics",
+                "Machine Analysis",
+                "Material Analysis",
+                "Predictive Analysis",
+                "Dataset Classification",
                 "AI Insights",
                 "Warnings",
                 "Recommendations",
@@ -94,6 +97,64 @@ class HardwareReportServiceTests(unittest.TestCase):
             for row in workbook["AI Insights"].iter_rows()
             for cell in row
         ])
+
+    def test_xlsx_includes_only_selected_report_sections(self):
+        workbook = load_workbook(
+            BytesIO(
+                build_hardware_xlsx(
+                    {
+                        **SAMPLE_ANALYSIS,
+                        "export_sections": [
+                            "kpi_overview",
+                            "batch_analysis",
+                        ],
+                    }
+                )
+            ),
+            data_only=True,
+        )
+
+        self.assertEqual(
+            workbook.sheetnames,
+            ["KPI Overview", "Batch Analysis"],
+        )
+        batch_values = [
+            cell.value
+            for row in workbook["Batch Analysis"].iter_rows()
+            for cell in row
+        ]
+        self.assertIn("Batch 1", batch_values)
+
+    def test_xlsx_includes_organization_factory_and_plant_scope(self):
+        workbook = load_workbook(
+            BytesIO(
+                build_hardware_xlsx(
+                    {
+                        **SAMPLE_ANALYSIS,
+                        "report_scope": {
+                            "organization": "Organization A",
+                            "factory": "Factory A",
+                            "plant": "Plant A",
+                        },
+                    },
+                    ["executive_summary"],
+                )
+            ),
+            data_only=True,
+        )
+
+        worksheet = workbook["Executive Summary"]
+        self.assertEqual(
+            [worksheet.cell(row=2, column=column).value for column in range(1, 7)],
+            [
+                "Organization",
+                "Organization A",
+                "Factory",
+                "Factory A",
+                "Plant",
+                "Plant A",
+            ],
+        )
 
     def test_xlsx_escapes_formula_like_user_values(self):
         workbook = load_workbook(
@@ -130,52 +191,40 @@ class HardwareReportServiceTests(unittest.TestCase):
         self.assertIn("Tóm tắt chất lượng sản xuất.", extracted_text)
         self.assertIn("Recommendations", extracted_text)
 
-
-class HardwareReportEndpointTests(unittest.TestCase):
-    def setUp(self):
-        from auth_test_helpers import override_admin_auth
-
-        self.auth_override = override_admin_auth
-        self.client = TestClient(app)
-
-    def tearDown(self):
-        from auth_test_helpers import clear_admin_auth_override
-
-        self.client.close()
-        clear_admin_auth_override()
-
-    def test_export_endpoint_requires_governed_publication(self):
-        from auth_test_helpers import override_admin_auth
-
-        override_admin_auth()
-        response = self.client.post(
-            "/api/hardware/export?format=pdf",
-            json=SAMPLE_ANALYSIS,
+    def test_pdf_includes_only_selected_report_sections(self):
+        pdf_bytes = build_hardware_pdf(
+            SAMPLE_ANALYSIS,
+            ["kpi_overview"],
         )
-        self.assertEqual(response.status_code, 410)
-
-    def test_export_endpoint_rejects_empty_or_unrelated_payloads(self):
-        from auth_test_helpers import override_admin_auth
-
-        override_admin_auth()
-        for payload in ({}, {"unrelated": "data"}):
-            with self.subTest(payload=payload):
-                response = self.client.post(
-                    "/api/hardware/export",
-                    json=payload,
-                )
-                self.assertEqual(response.status_code, 410)
-
-    def test_export_endpoint_rejects_unsupported_format(self):
-        from auth_test_helpers import override_admin_auth
-
-        override_admin_auth()
-        response = self.client.post(
-            "/api/hardware/export?format=doc",
-            json=SAMPLE_ANALYSIS,
+        extracted_text = "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(BytesIO(pdf_bytes)).pages
         )
 
-        self.assertEqual(response.status_code, 410)
+        self.assertIn("KPI Overview", extracted_text)
+        self.assertNotIn("Production Analysis", extracted_text)
+        self.assertNotIn("Recommendations", extracted_text)
+
+    def test_pdf_includes_organization_factory_and_plant_scope(self):
+        pdf_bytes = build_hardware_pdf(
+            {
+                **SAMPLE_ANALYSIS,
+                "report_scope": {
+                    "organization": "Organization A",
+                    "factory": "Factory A",
+                    "plant": "Plant A",
+                },
+            },
+            ["executive_summary"],
+        )
+        extracted_text = "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(BytesIO(pdf_bytes)).pages
+        )
+
+        self.assertIn("Organization A", extracted_text)
+        self.assertIn("Factory A", extracted_text)
+        self.assertIn("Plant A", extracted_text)
 
 
 if __name__ == "__main__":

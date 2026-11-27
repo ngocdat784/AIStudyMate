@@ -28,6 +28,10 @@ from app.services.hardware_ai_service import (
 from app.services.intelligence_orchestrator import (
     orchestrate_manufacturing_analysis,
 )
+from app.services.analysis_readiness_service import (
+    classify_analysis_dataset,
+    ensure_analysis_ready,
+)
 
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
@@ -2236,9 +2240,206 @@ Trả lời trực tiếp bằng tiếng Việt, dễ hiểu và có căn cứ v
 # Main Function
 # =========================================================
 
+def _analyze_available_domains(
+    dataframe: pd.DataFrame,
+    classification: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    from app.services.machine_intelligence_service import (
+        analyze_machine_intelligence,
+    )
+    from app.services.material_intelligence_service import (
+        analyze_material_intelligence,
+    )
+    from app.services.predictive_intelligence_service import (
+        analyze_predictive_intelligence,
+    )
+    from app.services.quality_intelligence_service import (
+        analyze_quality_intelligence,
+    )
+
+    analyzers = {
+        "quality": (
+            "Phân tích chất lượng",
+            lambda: analyze_quality_intelligence(dataframe, include_ai=False),
+        ),
+        "machine": (
+            "Phân tích máy móc",
+            lambda: analyze_machine_intelligence(dataframe),
+        ),
+        "material": (
+            "Phân tích vật liệu",
+            lambda: analyze_material_intelligence(dataframe, include_ai=False),
+        ),
+        "predictive": (
+            "Phân tích dự báo",
+            lambda: analyze_predictive_intelligence(dataframe),
+        ),
+    }
+    results: dict[str, dict[str, Any]] = {}
+    for analysis, (title, analyzer) in analyzers.items():
+        if not classification["analyses"][analysis]["ready"]:
+            continue
+        detail = analyzer()
+        kpi_results = detail.get("kpi_results", {})
+        metrics = {
+            key: value
+            for key, value in kpi_results.items()
+            if isinstance(value, dict) and value.get("value") is not None
+        }
+        if analysis == "machine":
+            metrics = {
+                key: {"value": value, "unit": ""}
+                for key, value in detail.get("overall", {}).items()
+                if isinstance(value, (int, float))
+                and not isinstance(value, bool)
+            }
+        if analysis == "predictive":
+            metrics = {
+                key: {
+                    "value": (
+                        value["forecast"][-1]["value"]
+                        if value.get("forecast")
+                        else value.get("status", "available")
+                    ),
+                    "unit": "",
+                }
+                for key, value in detail.get("forecasts", {}).items()
+                if isinstance(value, dict)
+            }
+        results[analysis] = {
+            "title": title,
+            "summary": detail.get("executive_summary") or (
+                f"Đã xử lý {detail.get('machine_count', 0)} thiết bị."
+                if analysis == "machine"
+                else f"Đã chạy {title.lower()} trên các trường phù hợp."
+            ),
+            "metrics": metrics,
+            "limitations": detail.get("analysis_limitations", []),
+        }
+    return results
+
+
+def _analyze_partial_hardware_dataset(
+    dataframe: pd.DataFrame,
+    classification: dict[str, Any],
+) -> dict[str, Any]:
+    unified_analysis = orchestrate_manufacturing_analysis(
+        dataframe,
+        include_ai=False,
+        require_production=False,
+    )
+    domain_analyses = _analyze_available_domains(dataframe, classification)
+    dataset_quality = unified_analysis["data_quality"]
+    kpi_labels = {
+        "production": ("Tổng sản lượng", "sản phẩm"),
+        "defects": ("Tổng số lỗi", "lỗi"),
+        "downtime_minutes": ("Tổng thời gian dừng", "phút"),
+        "defect_rate": ("Tỷ lệ lỗi", "%"),
+        "record_count": ("Số bản ghi", "bản ghi"),
+    }
+    kpis = [
+        {
+            "name": kpi_labels[name][0],
+            "value": metric["value"],
+            "unit": kpi_labels[name][1],
+            "description": (
+                f"Tính từ {metric['record_count']} bản ghi có trường "
+                f"{name} hợp lệ."
+            ),
+        }
+        for name, metric in unified_analysis["kpi_results"].items()
+        if name in kpi_labels and metric["value"] is not None
+    ]
+    insights = [
+        result["summary"] for result in domain_analyses.values()
+    ] or [unified_analysis["executive_summary"]]
+    warnings = list(unified_analysis["analysis_limitations"])
+    for result in domain_analyses.values():
+        warnings.extend(result["limitations"])
+    ai_analysis = build_fallback_deep_analysis()
+    for key in (
+        "executive_summary",
+        "production_analysis",
+        "quality_analysis",
+        "component_analysis",
+        "supplier_analysis",
+        "batch_analysis",
+        "downtime_analysis",
+    ):
+        ai_analysis[key] = {
+            "summary": "Phân tích AI chưa được yêu cầu cho bộ dữ liệu này.",
+            "key_observations": [],
+        }
+    ai_analysis["ai_status"] = "not_requested"
+    data_rows = max(
+        0,
+        dataset_quality["rows_read"] - dataset_quality["empty_rows"],
+    )
+    return {
+        "title": "Phân tích dữ liệu đa lĩnh vực",
+        "summary": unified_analysis["executive_summary"],
+        "kpis": kpis,
+        "insights": insights,
+        "warnings": list(dict.fromkeys(warnings)),
+        "recommendations": [],
+        "product_performance": [],
+        "model_performance": [],
+        "component_performance": [],
+        "supplier_performance": [],
+        "batch_performance": [],
+        "defect_type_analysis": [],
+        "daily_production": [],
+        "data_scope": {
+            "has_product_data": "Product" in classification["recognized_fields"],
+            "has_model_data": "Model" in classification["recognized_fields"],
+            "has_component_data": "Component" in classification["recognized_fields"],
+            "has_supplier_data": "Supplier" in classification["recognized_fields"],
+            "has_batch_data": "Batch" in classification["recognized_fields"],
+            "has_defect_type_data": "Defect" in classification["recognized_fields"],
+            "has_quality_status_data": "Quality Status" in classification["recognized_fields"],
+            "has_defect_data": "Defects" in classification["recognized_fields"],
+            "has_downtime_data": "Downtime" in classification["recognized_fields"],
+            "has_date_data": "Date" in classification["recognized_fields"],
+        },
+        "data_quality": {
+            **dataset_quality,
+            "total_rows": dataset_quality["rows_read"],
+            "data_rows": data_rows,
+            "negative_values": {},
+            "missing_columns": [],
+        },
+        "data_processing": {
+            "rows_after_deduplication": dataset_quality["rows_used_for_analysis"],
+            "rows_used_for_kpi": dataset_quality["rows_used_for_analysis"],
+            "invalid_metric_rows_excluded": dataset_quality["invalid_rows"],
+            "invalid_metric_rows_excluded_by_metric": dataset_quality[
+                "invalid_values"
+            ],
+        },
+        "anomaly_analysis": {
+            "status": (
+                "completed"
+                if unified_analysis["detected_anomalies"]
+                else "insufficient_data"
+            ),
+            "findings": {},
+        },
+        "ai_analysis": ai_analysis,
+        "ai_status": "not_requested",
+        "unified_analysis": unified_analysis,
+        "evidence": unified_analysis["evidence_references"],
+        "dataset_classification": classification,
+        "domain_analyses": domain_analyses,
+    }
+
+
 def analyze_hardware_dataframe(
     dataframe: pd.DataFrame,
 ) -> dict[str, Any]:
+    classification = classify_analysis_dataset(dataframe)
+    ensure_analysis_ready(classification, "general")
+    if not classification["analyses"]["production"]["ready"]:
+        return _analyze_partial_hardware_dataset(dataframe, classification)
 
     kpis = calculate_hardware_kpis(
         dataframe
@@ -2338,8 +2539,14 @@ def analyze_hardware_dataframe(
     unified_analysis = orchestrate_manufacturing_analysis(
         dataframe,
         include_ai=False,
+        require_production=False,
     )
     result["unified_analysis"] = unified_analysis
     result["evidence"] = unified_analysis["evidence_references"]
+    result["dataset_classification"] = classification
+    result["domain_analyses"] = _analyze_available_domains(
+        dataframe,
+        classification,
+    )
 
     return result

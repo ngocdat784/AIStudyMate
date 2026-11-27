@@ -6,7 +6,7 @@ import math
 from datetime import date, datetime, timezone
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 import zipfile
 
@@ -24,8 +24,9 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import StreamingResponse
 from pypdf import PdfReader
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, load_only
 from starlette.concurrency import run_in_threadpool
@@ -33,7 +34,13 @@ from starlette.concurrency import run_in_threadpool
 from app.config import settings
 from app.database.connection import SessionLocal, get_db
 from app.models import AnalysisHistory, HardwareAnalysisJob
-from app.models.monitoring import AlertUser, Plant
+from app.models.monitoring import (
+    AlertUser,
+    ApplicationSetting,
+    Factory,
+    Organization,
+    Plant,
+)
 from app.services.monitoring_auth import (
     get_current_user,
     require_plant_access,
@@ -41,6 +48,14 @@ from app.services.monitoring_auth import (
 )
 from app.services.api_rate_limit import rate_limit_dependency
 from app.services.analysis_history_service import create_analysis_history
+from app.services.analysis_readiness_service import (
+    classify_analysis_dataset,
+    ensure_analysis_ready,
+)
+from app.services.hardware_report_service import (
+    build_hardware_pdf,
+    build_hardware_xlsx,
+)
 from app.services.hardware_ai_service import (
     analyze_hardware_comparison,
     explain_hardware_intervention,
@@ -64,6 +79,7 @@ from app.services.multi_file_service import (
     normalize_hardware_files,
     store_merged_hardware_dataset,
 )
+from app.services.user_audit import record_user_action
 from app.services.hardware_trend_service import (
     Granularity,
     analyze_hardware_trends,
@@ -87,6 +103,14 @@ router = APIRouter(
     tags=["HardwareAI - Hardware Analysis"],
     dependencies=[Depends(require_roles("admin", "operator"))],
 )
+
+
+class HardwareReportExportRequest(BaseModel):
+    format: Literal["pdf", "xlsx"]
+    sections: list[str] = Field(min_length=1, max_length=15)
+    organization_id: int = Field(gt=0)
+    plant_id: int = Field(gt=0)
+    payload: dict[str, Any]
 
 logger = logging.getLogger(__name__)
 MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -707,6 +731,11 @@ async def analyze_hardware(
         }
     except HTTPException:
         raise
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=str(error),
+        ) from error
     except Exception as error:
         logger.exception("Hardware analysis failed")
         raise HTTPException(
@@ -888,6 +917,8 @@ def process_hardware_analysis_job(job_id: str) -> None:
             content,
             allow_documents=True,
         )
+        classification = classify_analysis_dataset(dataframe)
+        ensure_analysis_ready(classification, "general")
         update_hardware_analysis_job_stage(
             job_id,
             stage="calculating_kpis",
@@ -1106,16 +1137,92 @@ async def compare_hardware_periods_endpoint(
         ) from error
 
 
-@router.post("/export")
+@router.post(
+    "/export",
+    dependencies=[
+        Depends(
+            rate_limit_dependency(
+                "hardware-direct-export",
+                limit=20,
+                window_seconds=60,
+            )
+        )
+    ],
+)
 def export_hardware_report(
-    _: dict[str, Any] = Body(...),
-):
-    raise HTTPException(
-        status_code=410,
-        detail=(
-            "Xuất báo cáo trực tiếp đã tắt. Hãy lưu báo cáo, gửi duyệt, "
-            "phát hành rồi xuất từ Analysis Reports."
-        ),
+    request: HardwareReportExportRequest,
+    db: Session = Depends(get_db),
+    user: AlertUser = Depends(require_roles("admin", "operator")),
+) -> StreamingResponse:
+    setting = db.get(ApplicationSetting, "hardware_direct_export")
+    if not setting or not setting.value.get("enabled", False):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Xuất trực tiếp đang tắt. Hãy lưu báo cáo, gửi duyệt, "
+                "phát hành rồi xuất từ Analysis Reports."
+            ),
+        )
+    organization = db.get(Organization, request.organization_id)
+    plant = db.get(Plant, request.plant_id)
+    if organization is None:
+        raise HTTPException(status_code=422, detail="Organization không tồn tại.")
+    if plant is None or plant.factory_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Plant phải được ánh xạ với Factory trước khi xuất.",
+        )
+    factory = db.get(Factory, plant.factory_id)
+    if factory is None or factory.organization_id != organization.id:
+        raise HTTPException(
+            status_code=422,
+            detail="Plant không thuộc Organization đã chọn.",
+        )
+    require_plant_access(db, user, plant.id)
+    report_payload = {
+        **request.payload,
+        "report_scope": {
+            "organization": organization.name,
+            "factory": factory.name,
+            "plant": plant.name,
+        },
+    }
+    try:
+        content = (
+            build_hardware_pdf(report_payload, request.sections)
+            if request.format == "pdf"
+            else build_hardware_xlsx(report_payload, request.sections)
+        )
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(
+            status_code=422,
+            detail=str(error),
+        ) from error
+    record_user_action(
+        db,
+        actor=user,
+        action="report.direct_exported",
+        object_type="hardware_analysis",
+        object_id=str(request.payload.get("analysis_history_id") or ""),
+        after_data={
+            "format": request.format,
+            "sections": request.sections,
+            "organization_id": organization.id,
+            "factory_id": factory.id,
+            "plant_id": plant.id,
+        },
+    )
+    db.commit()
+    media_type = (
+        "application/pdf"
+        if request.format == "pdf"
+        else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    filename = f"hardware-analysis.{request.format}"
+    return StreamingResponse(
+        iter([content]),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

@@ -10,6 +10,10 @@ from app.database.connection import get_db
 from app.models.monitoring import AlertUser
 from app.routes.hardware import _read_hardware_upload
 from app.services.analysis_history_service import create_analysis_history
+from app.services.analysis_readiness_service import (
+    classify_analysis_dataset,
+    ensure_analysis_ready,
+)
 from app.services.api_rate_limit import rate_limit_dependency
 from app.services.monitoring_auth import get_current_user, require_roles
 from app.services.predictive_intelligence_service import (
@@ -82,6 +86,11 @@ async def analyze_predictive_file(
     try:
         dataframe = await _read_hardware_upload(file)
         mapping = _parse_column_mapping(column_mapping)
+        classification = classify_analysis_dataset(
+            dataframe,
+            column_mapping=mapping,
+        )
+        ensure_analysis_ready(classification, "predictive")
         result = await run_in_threadpool(
             analyze_predictive_intelligence,
             dataframe,
@@ -100,6 +109,7 @@ async def analyze_predictive_file(
                 quality_improvement_percentage_points
             ),
         )
+        result["dataset_classification"] = classification
     except HTTPException:
         raise
     except ValueError as error:

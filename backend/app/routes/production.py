@@ -8,6 +8,10 @@ from starlette.concurrency import run_in_threadpool
 from app.database.connection import get_db
 from app.models.monitoring import AlertUser
 from app.routes.hardware import _parse_hardware_content, _read_upload_content
+from app.services.analysis_readiness_service import (
+    classify_analysis_dataset,
+    ensure_analysis_ready,
+)
 from app.services.analysis_history_service import create_analysis_history
 from app.services.api_rate_limit import rate_limit_dependency
 from app.services.monitoring_auth import get_current_user, require_roles
@@ -138,6 +142,8 @@ async def analyze_production(
             file.filename or "",
             content,
         )
+        classification = classify_analysis_dataset(dataframe)
+        ensure_analysis_ready(classification, "production")
         response = await run_in_threadpool(
             _analyze_production_dataframe,
             dataframe,
@@ -148,6 +154,7 @@ async def analyze_production(
             production_unit=production_unit,
             include_ai=include_ai,
         )
+        response["dataset_classification"] = classification
 
         try:
             create_analysis_history(
