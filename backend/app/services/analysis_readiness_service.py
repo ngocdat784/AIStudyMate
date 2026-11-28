@@ -5,6 +5,7 @@ from typing import Any
 import pandas as pd
 
 from app.services.manufacturing_data_foundation import _resolve_mapping
+from app.services.hardware_knowledge_base import profile_hardware_dataframe
 
 
 _FIELD_GROUPS: dict[str, set[str]] = {
@@ -121,13 +122,19 @@ def classify_analysis_dataset(
     column_mapping: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     mapping = _resolve_mapping(list(dataframe.columns), column_mapping)
-    fields = sorted(set(mapping.values()))
+    hardware_profile = profile_hardware_dataframe(dataframe)
+    combined_mapping = dict(mapping)
+    for source, target in hardware_profile["column_mapping"].items():
+        combined_mapping.setdefault(source, target)
+    fields = sorted(set(combined_mapping.values()))
     field_set = set(fields)
     domains = [
         domain
         for domain, domain_fields in _FIELD_GROUPS.items()
         if field_set.intersection(domain_fields)
     ]
+    if hardware_profile["hardware_categories"]:
+        domains.append("hardware")
 
     analyses: dict[str, dict[str, Any]] = {}
     for analysis, (label, required_fields) in _ANALYSIS_REQUIREMENTS.items():
@@ -141,8 +148,17 @@ def classify_analysis_dataset(
 
     analyses["general"] = {
         "label": "phân tích file tổng quát",
-        "ready": bool(field_set.intersection(_GENERAL_FIELDS)),
-        "matched_fields": sorted(field_set.intersection(_GENERAL_FIELDS)),
+        "ready": bool(
+            field_set.intersection(_GENERAL_FIELDS)
+            or hardware_profile["hardware_categories"]
+        ),
+        "matched_fields": sorted(
+            field_set.intersection(_GENERAL_FIELDS)
+            | {
+                field
+                for field in hardware_profile["column_mapping"].values()
+            }
+        ),
         "required_any_of": sorted(_GENERAL_FIELDS),
     }
 
@@ -178,9 +194,10 @@ def classify_analysis_dataset(
         "domain": domains[0] if len(domains) == 1 else (
             "mixed" if domains else "unrecognized"
         ),
-        "domains": domains,
+        "domains": sorted(set(domains)),
         "recognized_fields": fields,
         "analyses": analyses,
+        "hardware_profile": hardware_profile,
     }
 
 

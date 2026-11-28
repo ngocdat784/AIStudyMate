@@ -1,0 +1,12 @@
+{
+  "version": "1.0.0",
+  "policy": "Do not infer permission to redistribute, commercialize, or train models from public accessibility.",
+  "sources": [
+    {"source_id": "dmtf_smbios", "license": "not_reviewed", "commercial_use": "not_verified", "redistribution": "not_verified", "ai_training": "not_verified", "reviewed_at": null, "notes": "Check the specific specification's copyright and distribution terms before collecting or using document text."},
+    {"source_id": "dmtf_cim", "license": "not_reviewed", "commercial_use": "not_verified", "redistribution": "not_verified", "ai_training": "not_verified", "reviewed_at": null, "notes": "Review DMTF terms for each document and version."},
+    {"source_id": "uefi_specifications", "license": "not_reviewed", "commercial_use": "not_verified", "redistribution": "not_verified", "ai_training": "not_verified", "reviewed_at": null, "notes": "Review UEFI Forum terms for each specification and version."},
+    {"source_id": "dmtf_redfish", "license": "not_reviewed", "commercial_use": "not_verified", "redistribution": "not_verified", "ai_training": "not_verified", "reviewed_at": null, "notes": "Review DMTF terms for each document and version."},
+    {"source_id": "intel_ipmi", "license": "not_reviewed", "commercial_use": "not_verified", "redistribution": "not_verified", "ai_training": "not_verified", "reviewed_at": null, "notes": "Review Intel's terms and the applicable IPMI specification license."},
+    {"source_id": "opentelemetry_hardware_conventions", "license": "Apache-2.0 (repository; verify individual files)", "commercial_use": "verify_before_use", "redistribution": "verify_before_use", "ai_training": "not_authorized_by_this_metadata", "reviewed_at": null, "notes": "Repository-level license does not automatically clear every referenced source or third-party contribution."}
+  ]
+}

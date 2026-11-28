@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aistudymate.local/knowledge_base/schemas/hardware_schema.json",
+  "title": "Hardware inventory record",
+  "type": "object",
+  "properties": {
+    "schema_version": {"type": "string"},
+    "source": {"type": "object", "properties": {"filename": {"type": "string"}, "row": {"type": "integer"}, "raw_columns": {"type": "object"}}, "additionalProperties": true},
+    "system": {"type": "object", "additionalProperties": true},
+    "components": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+    "sensors": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "value": {"type": ["number", "string", "null"]}, "unit": {"type": ["string", "null"]}}, "additionalProperties": true}},
+    "unknown_attributes": {"type": "object", "additionalProperties": true}
+  },
+  "additionalProperties": true
+}

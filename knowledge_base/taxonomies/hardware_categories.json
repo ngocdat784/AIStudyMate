@@ -1,0 +1,60 @@
+{
+  "version": "1.0.0",
+  "categories": [
+    {
+      "id": "physical_inventory",
+      "label": "Physical hardware inventory",
+      "keywords": ["motherboard", "baseboard", "chassis", "processor", "cpu", "memory device", "dimm", "component"]
+    },
+    {
+      "id": "firmware_configuration",
+      "label": "Firmware and configuration",
+      "keywords": ["bios", "uefi", "firmware", "boot", "secure boot", "firmware variable"]
+    },
+    {
+      "id": "hardware_abstraction_interface",
+      "label": "Hardware abstraction and management interfaces",
+      "keywords": ["acpi", "cim", "redfish", "ipmi", "namespace", "hardware id"]
+    },
+    {
+      "id": "system_firmware",
+      "label": "System and firmware",
+      "keywords": ["system", "bios", "uefi", "firmware", "boot", "motherboard", "baseboard", "smbios", "dmi"]
+    },
+    {
+      "id": "cpu",
+      "label": "CPU",
+      "keywords": ["cpu", "processor", "core", "thread", "socket", "frequency", "clock speed"]
+    },
+    {
+      "id": "gpu",
+      "label": "GPU",
+      "keywords": ["gpu", "graphics", "video controller", "vram", "cuda"]
+    },
+    {
+      "id": "memory",
+      "label": "Memory",
+      "keywords": ["memory", "ram", "dimm", "sodimm", "ecc", "dram"]
+    },
+    {
+      "id": "storage",
+      "label": "Storage",
+      "keywords": ["storage", "disk", "drive", "nvme", "ssd", "hdd", "capacity", "smart"]
+    },
+    {
+      "id": "bus_connectivity",
+      "label": "Bus and connectivity",
+      "keywords": ["pci", "pcie", "usb", "bus", "network", "ethernet", "mac address"]
+    },
+    {
+      "id": "power_thermal",
+      "label": "Power and thermal",
+      "keywords": ["power", "voltage", "current", "watt", "thermal", "temperature", "fan", "battery"]
+    },
+    {
+      "id": "monitoring",
+      "label": "Monitoring and management",
+      "keywords": ["sensor", "redfish", "ipmi", "bmc", "cim", "telemetry", "health", "status"]
+    }
+  ]
+}

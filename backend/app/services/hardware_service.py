@@ -32,6 +32,8 @@ from app.services.analysis_readiness_service import (
     classify_analysis_dataset,
     ensure_analysis_ready,
 )
+from app.services.hardware_standards import detect_hardware_standards
+from app.services.hardware_knowledge_base import profile_hardware_dataframe
 
 
 GEMINI_MODEL = "gemini-3.5-flash-lite"
@@ -2430,6 +2432,8 @@ def _analyze_partial_hardware_dataset(
         "evidence": unified_analysis["evidence_references"],
         "dataset_classification": classification,
         "domain_analyses": domain_analyses,
+        "hardware_standards": detect_hardware_standards(dataframe),
+        "hardware_profile": profile_hardware_dataframe(dataframe),
     }
 
 
@@ -2444,6 +2448,8 @@ def analyze_hardware_dataframe(
     kpis = calculate_hardware_kpis(
         dataframe
     )
+    kpis["hardware_standards"] = detect_hardware_standards(dataframe)
+    kpis["hardware_profile"] = profile_hardware_dataframe(dataframe)
 
     anomalies = detect_hardware_anomalies(kpis)
 
@@ -2548,5 +2554,7 @@ def analyze_hardware_dataframe(
         dataframe,
         classification,
     )
+    result["hardware_standards"] = detect_hardware_standards(dataframe)
+    result["hardware_profile"] = profile_hardware_dataframe(dataframe)
 
     return result

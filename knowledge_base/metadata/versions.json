@@ -1,0 +1,9 @@
+{
+  "pack_id": "hardwareai-knowledge-foundation",
+  "pack_version": "1.0.0",
+  "schema_version": "1.0.0",
+  "created_at": "2026-11-28",
+  "status": "foundation",
+  "documents_embedded": false,
+  "notes": "Initial structured dictionaries, taxonomies, and schemas. Official specifications are catalogued but not downloaded."
+}

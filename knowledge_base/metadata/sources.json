@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "sources": [
+    {"id": "dmtf_smbios", "name": "DMTF SMBIOS", "url": "https://www.dmtf.org/standards/smbios", "topics": ["SMBIOS"], "status": "catalogued_not_downloaded", "retrieved_at": null, "version": null},
+    {"id": "dmtf_cim", "name": "DMTF CIM", "url": "https://www.dmtf.org/standards/cim", "topics": ["CIM"], "status": "catalogued_not_downloaded", "retrieved_at": null, "version": null},
+    {"id": "uefi_specifications", "name": "UEFI Specifications", "url": "https://uefi.org/specifications", "topics": ["UEFI", "ACPI", "UEFI PI"], "status": "catalogued_not_downloaded", "retrieved_at": null, "version": null},
+    {"id": "dmtf_redfish", "name": "DMTF Redfish", "url": "https://www.dmtf.org/standards/redfish", "topics": ["Redfish"], "status": "catalogued_not_downloaded", "retrieved_at": null, "version": null},
+    {"id": "intel_ipmi", "name": "Intel IPMI", "url": "https://www.intel.com/content/www/us/en/servers/ipmi/ipmi-home.html", "topics": ["IPMI"], "status": "catalogued_not_downloaded", "retrieved_at": null, "version": null},
+    {"id": "opentelemetry_hardware_conventions", "name": "OpenTelemetry Semantic Conventions", "url": "https://github.com/open-telemetry/semantic-conventions", "topics": ["hardware metrics", "telemetry"], "status": "catalogued_not_downloaded", "retrieved_at": null, "version": null}
+  ]
+}

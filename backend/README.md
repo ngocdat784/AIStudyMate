@@ -119,6 +119,67 @@ HARDWARE_ANALYSIS_JOB_POLL_SECONDS=1
 HARDWARE_ANALYSIS_JOB_LEASE_SECONDS=3600
 ```
 
+### Hardware Standards & Knowledge Pack
+
+The P0 Hardware Standards pack provides structured metadata for SMBIOS, DMI,
+UEFI, ACPI, CIM, Redfish, IPMI, and UEFI PI. It helps file analysis recognize
+hardware, firmware, server-management, sensor, power, and thermal fields.
+
+- `GET /api/hardware/standards` lists the P0 pack and official source links.
+- `POST /api/hardware/standards/detect` accepts `text` or `columns` and
+  identifies likely standards represented by the input.
+- Hardware analysis results include a `hardware_standards` section and send
+  detected standards metadata to Gemini as supporting context.
+
+The pack is an identification and grounding resource, not a substitute for
+official specifications or a claim that the project embeds every standard
+document in full.
+
+The versioned, structured pack lives at the repository root in `knowledge_base/`
+and is copied into backend container images. It contains taxonomies, canonical
+attributes, column aliases, unit and sensor dictionaries, JSON Schemas, and
+source/license/version metadata. During analysis, known columns are mapped to
+canonical attributes while unknown source columns and their values remain
+available as raw record attributes; the response reports raw headers, mappings,
+unknown fields, inferred categories, and recognized sensor labels. Unit labels
+are normalized for metadata only; numeric readings are not converted without an
+explicit conversion rule.
+
+Hardware-specific XLSX workbooks are parsed worksheet by worksheet rather than
+concatenated into one mixed-schema table. Their `ingestion.sheets` entries
+report each detected header row, original headers, and row/column counts;
+documentation and test-metadata sheets remain visible in ingestion totals but
+are excluded from hardware classification. `hardware_workbook_analysis`
+reports per-sheet mappings, structural evidence for SMBIOS/DMI, UEFI, ACPI,
+CIM, Redfish, IPMI, and UEFI PI, and normalized sensor readings with their
+source sheet, device, units, health/status, timestamp, and available thresholds.
+SMBIOS Type 0 is classified as firmware metadata, separately from physical
+inventory structures. Product IDs and vendor IDs remain generic identifiers
+unless a PCI-specific header establishes that namespace. The source workbook is
+not rewritten; unknown columns remain listed in the sheet profile. Uploaded
+files are still subject to the existing retention behavior.
+
+The workbook response also reports data quality for non-empty hardware rows:
+missing cells, invalid values in known typed fields, exact duplicate rows, and
+empty rows after detected headers. Optional fields are not treated as required,
+and duplicate/source rows are reported but retained. `quality_score` is the
+share of non-empty hardware rows without invalid typed values; it does not claim
+standards compliance. Unknown columns include conservative type and meaning
+hints, while their original values remain untouched. Redfish and IPMI
+observations are profiled as monitoring sensors, separately from ACPI/CIM
+hardware interfaces. Sensor readings expose both raw values/source units and
+normalized values/units.
+
+When a workbook includes an `Expected_Detection` sheet with T01–T13 identifiers,
+`hardware_workbook_analysis.phase1_test_report` evaluates the applicable checks
+and returns a PASS/FAIL status with evidence for each test. This is a
+workbook-specific regression report, not a certification of the underlying
+standards.
+
+The Knowledge Base does not include copied specification PDFs. Source pages
+remain catalogued as not downloaded, and license/commercial/redistribution/AI
+training permissions must be reviewed before importing document content.
+
 Apply migrations before starting the API:
 
 ```powershell

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GPU attributes",
+  "type": "object",
+  "properties": {
+    "manufacturer": {"type": ["string", "null"]},
+    "model": {"type": ["string", "null"]},
+    "memory_capacity": {"type": ["number", "null"], "minimum": 0},
+    "memory_unit": {"type": ["string", "null"]},
+    "temperature": {"type": ["number", "null"]},
+    "temperature_unit": {"type": ["string", "null"]},
+    "utilization": {"type": ["number", "null"], "minimum": 0, "maximum": 100}
+  },
+  "additionalProperties": true
+}

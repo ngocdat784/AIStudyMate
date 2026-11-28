@@ -7,13 +7,14 @@ WORKDIR /app
 
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-COPY alembic.ini .
-COPY migrations ./migrations
-COPY app ./app
+COPY backend/alembic.ini .
+COPY backend/migrations ./migrations
+COPY backend/app ./app
+COPY knowledge_base ./knowledge_base
 
 USER app
 EXPOSE 8000

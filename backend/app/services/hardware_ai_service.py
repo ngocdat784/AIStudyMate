@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.config import settings
 from app.services.ai_audit_context import AIAuditContext
 from app.services.gemini_retry import call_gemini_with_retry
+from app.services.hardware_standards import detect_hardware_standards
 
 
 
@@ -451,6 +452,17 @@ def _build_ai_context(
 
     context = {
         "metrics": metrics,
+        "hardware_standards": _clean_for_json(
+            report.get(
+                "hardware_standards",
+                detect_hardware_standards(
+                    text=[
+                        str(key)
+                        for key in report.keys()
+                    ]
+                ),
+            )
+        ),
         "anomaly_analysis": _clean_for_json(
             anomalies if anomalies is not None else {
                 "status": "insufficient_data",
@@ -471,6 +483,13 @@ def _build_ai_context(
             if isinstance(value, dict)
             else {}
         )
+
+    hardware_profile = report.get("hardware_profile")
+    context["hardware_profile"] = (
+        _clean_for_json(hardware_profile)
+        if isinstance(hardware_profile, dict)
+        else {}
+    )
 
     for key in analysis_keys:
         value = report.get(key, [])

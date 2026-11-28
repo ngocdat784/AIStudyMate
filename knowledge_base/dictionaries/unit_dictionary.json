@@ -1,0 +1,45 @@
+{
+  "version": "1.0.0",
+  "normalization": {
+    "temperature": {
+      "Cel": ["c", "°c", "degc", "celsius", "degree c", "degrees c"],
+      "[degF]": ["f", "°f", "degf", "fahrenheit"]
+    },
+    "information": {
+      "By": ["byte", "bytes", "b"],
+      "kBy": ["kb", "kilobyte", "kilobytes"],
+      "MBy": ["mb", "megabyte", "megabytes"],
+      "GBy": ["gb", "gigabyte", "gigabytes"],
+      "TBy": ["tb", "terabyte", "terabytes"],
+      "KiBy": ["kib", "kibibyte", "kibibytes"],
+      "MiBy": ["mib", "mebibyte", "mebibytes"],
+      "GiBy": ["gib", "gibibyte", "gibibytes"],
+      "TiBy": ["tib", "tebibyte", "tebibytes"]
+    },
+    "frequency": {
+      "Hz": ["hz", "hertz"],
+      "kHz": ["khz", "kilohertz"],
+      "MHz": ["mhz", "megahertz"],
+      "GHz": ["ghz", "gigahertz"]
+    },
+    "power": {
+      "W": ["w", "watt", "watts"],
+      "mW": ["mw", "milliwatt", "milliwatts"],
+      "kW": ["kw", "kilowatt", "kilowatts"]
+    },
+    "voltage": {
+      "V": ["v", "volt", "volts"],
+      "mV": ["mv", "millivolt", "millivolts"]
+    },
+    "count": {
+      "1": ["count", "counts", "unit", "units", "pcs", "pieces"]
+    },
+    "time": {
+      "s": ["s", "sec", "second", "seconds"],
+      "ms": ["ms", "millisecond", "milliseconds"],
+      "min": ["min", "minute", "minutes"],
+      "h": ["h", "hr", "hour", "hours"]
+    }
+  },
+  "policy": "Unit labels can be normalized for display. Do not convert numeric values without an explicit source-unit and conversion rule."
+}

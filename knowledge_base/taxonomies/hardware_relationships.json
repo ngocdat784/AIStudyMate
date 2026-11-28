@@ -1,0 +1,12 @@
+{
+  "version": "1.0.0",
+  "relationships": [
+    {"from": "system", "relation": "contains", "to": "motherboard"},
+    {"from": "motherboard", "relation": "hosts", "to": "cpu"},
+    {"from": "motherboard", "relation": "hosts", "to": "memory"},
+    {"from": "system", "relation": "contains", "to": "gpu"},
+    {"from": "system", "relation": "contains", "to": "storage"},
+    {"from": "sensor", "relation": "measures", "to": "power_thermal_metric"},
+    {"from": "bmc", "relation": "manages", "to": "server_hardware"}
+  ]
+}

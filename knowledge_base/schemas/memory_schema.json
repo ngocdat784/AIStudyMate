@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Memory attributes",
+  "type": "object",
+  "properties": {
+    "manufacturer": {"type": ["string", "null"]},
+    "type": {"type": ["string", "null"]},
+    "capacity": {"type": ["number", "null"], "minimum": 0},
+    "capacity_unit": {"type": ["string", "null"]},
+    "speed": {"type": ["number", "null"], "minimum": 0},
+    "speed_unit": {"type": ["string", "null"]},
+    "ecc": {"type": ["boolean", "null"]}
+  },
+  "additionalProperties": true
+}

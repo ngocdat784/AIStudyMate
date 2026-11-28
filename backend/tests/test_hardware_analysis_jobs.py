@@ -132,6 +132,26 @@ class HardwareAnalysisJobTests(unittest.TestCase):
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(list_response.json()["pagination"]["total"], 1)
 
+    def test_hardware_standards_endpoints_serve_knowledge_base_metadata(self):
+        response = self.client.get("/api/hardware/standards")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        pack = response.json()
+        self.assertEqual(pack["knowledge_base_version"], "1.0.0")
+        self.assertTrue(pack["sources"])
+        self.assertTrue(pack["license_review"]["sources"])
+        self.assertIn(
+            "SMBIOS",
+            {item["id"] for item in pack["standards"]},
+        )
+
+        detected = self.client.post(
+            "/api/hardware/standards/detect",
+            json={"columns": ["BIOS Version", "Processor Name"]},
+        )
+        self.assertEqual(detected.status_code, 200, detected.text)
+        self.assertIn("SMBIOS", detected.json()["detected_ids"])
+
     def test_job_submission_queues_without_parsing_the_file(self):
         with patch(
             "app.routes.hardware._parse_hardware_content",

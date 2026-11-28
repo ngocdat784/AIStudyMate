@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CPU attributes",
+  "type": "object",
+  "properties": {
+    "manufacturer": {"type": ["string", "null"]},
+    "model": {"type": ["string", "null"]},
+    "core_count": {"type": ["integer", "null"], "minimum": 0},
+    "thread_count": {"type": ["integer", "null"], "minimum": 0},
+    "frequency": {"type": ["number", "null"], "minimum": 0},
+    "frequency_unit": {"type": ["string", "null"]},
+    "temperature": {"type": ["number", "null"]},
+    "temperature_unit": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}

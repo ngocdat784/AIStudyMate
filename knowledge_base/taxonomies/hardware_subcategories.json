@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "subcategories": [
+    {"id": "bios", "parent": "system_firmware"},
+    {"id": "boot_configuration", "parent": "system_firmware"},
+    {"id": "motherboard", "parent": "system_firmware"},
+    {"id": "processor", "parent": "cpu"},
+    {"id": "graphics_processor", "parent": "gpu"},
+    {"id": "memory_module", "parent": "memory"},
+    {"id": "storage_device", "parent": "storage"},
+    {"id": "bus_device", "parent": "bus_connectivity"},
+    {"id": "temperature_sensor", "parent": "power_thermal"},
+    {"id": "power_sensor", "parent": "power_thermal"},
+    {"id": "server_management_controller", "parent": "monitoring"}
+  ]
+}

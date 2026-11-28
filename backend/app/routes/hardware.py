@@ -71,6 +71,7 @@ from app.services.hardware_comparison_service import (
     ComparisonDimension,
     compare_hardware_periods,
 )
+from app.services.hardware_workbook_analysis import analyze_hardware_workbook
 from app.services.multi_file_service import (
     DATASET_CACHE_TTL_SECONDS,
     DatasetCacheCapacityError,
@@ -95,6 +96,10 @@ from app.services.hardware_analysis_jobs import (
 )
 from app.services.document_table_extractor import (
     extract_document_tables_with_gemini,
+)
+from app.services.hardware_standards import (
+    detect_hardware_standards,
+    get_hardware_standards_pack,
 )
 
 
@@ -692,14 +697,37 @@ async def analyze_hardware(
     user: AlertUser = Depends(get_current_user),
 ):
     try:
-        dataframe = await _read_hardware_upload(
-            file,
+        extension = _validate_hardware_filename(
+            file.filename,
             allow_documents=True,
         )
-        response = await run_in_threadpool(
-            analyze_hardware_dataframe,
-            dataframe,
-        )
+        workbook_response = None
+        if extension == ".xlsx":
+            content = await _read_upload_content(file)
+            workbook_response = await run_in_threadpool(
+                analyze_hardware_workbook,
+                file.filename or "",
+                content,
+            )
+        if workbook_response is not None:
+            response = workbook_response
+        else:
+            if extension == ".xlsx":
+                dataframe = await run_in_threadpool(
+                    _parse_hardware_content,
+                    file.filename or "",
+                    content,
+                    allow_documents=True,
+                )
+            else:
+                dataframe = await _read_hardware_upload(
+                    file,
+                    allow_documents=True,
+                )
+            response = await run_in_threadpool(
+                analyze_hardware_dataframe,
+                dataframe,
+            )
         if custom_prompt.strip():
             try:
                 response["custom_prompt_response"] = (
@@ -788,6 +816,30 @@ async def create_hardware_analysis_job(
         plant_id=plant_id,
     )
     return serialize_hardware_analysis_job(job, include_result=False)
+
+
+@router.get("/standards")
+def list_hardware_standards() -> dict[str, Any]:
+    return get_hardware_standards_pack()
+
+
+@router.post("/standards/detect")
+def detect_hardware_standards_from_text(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    text = payload.get("text")
+    columns = payload.get("columns")
+    if not isinstance(text, str) and not isinstance(columns, list):
+        raise HTTPException(
+            status_code=422,
+            detail="Cần cung cấp text dạng chuỗi hoặc columns dạng danh sách.",
+        )
+    candidates: list[str] = []
+    if isinstance(text, str):
+        candidates.append(text)
+    if isinstance(columns, list):
+        candidates.extend(str(value) for value in columns)
+    return detect_hardware_standards(text=candidates)
 
 
 @router.get("/jobs")
@@ -912,19 +964,28 @@ def process_hardware_analysis_job(job_id: str) -> None:
             stage="reading_file",
             progress=10,
         )
-        dataframe = _parse_hardware_content(
-            filename,
-            content,
-            allow_documents=True,
-        )
-        classification = classify_analysis_dataset(dataframe)
-        ensure_analysis_ready(classification, "general")
-        update_hardware_analysis_job_stage(
-            job_id,
-            stage="calculating_kpis",
-            progress=35,
-        )
-        response = analyze_hardware_dataframe(dataframe)
+        workbook_response = analyze_hardware_workbook(filename, content)
+        if workbook_response is not None:
+            update_hardware_analysis_job_stage(
+                job_id,
+                stage="calculating_kpis",
+                progress=35,
+            )
+            response = workbook_response
+        else:
+            dataframe = _parse_hardware_content(
+                filename,
+                content,
+                allow_documents=True,
+            )
+            classification = classify_analysis_dataset(dataframe)
+            ensure_analysis_ready(classification, "general")
+            update_hardware_analysis_job_stage(
+                job_id,
+                stage="calculating_kpis",
+                progress=35,
+            )
+            response = analyze_hardware_dataframe(dataframe)
         if custom_prompt:
             update_hardware_analysis_job_stage(
                 job_id,

@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "sensors": [
+    {"id": "temperature", "aliases": ["temperature", "temp", "thermal"], "unit": "Cel", "category": "power_thermal"},
+    {"id": "fan_speed", "aliases": ["fan speed", "fan rpm", "rpm"], "unit": "rpm", "category": "power_thermal"},
+    {"id": "voltage", "aliases": ["voltage", "volt", "vcore"], "unit": "V", "category": "power_thermal"},
+    {"id": "current", "aliases": ["current", "amperage"], "unit": "A", "category": "power_thermal"},
+    {"id": "power", "aliases": ["power", "power draw", "power consumption"], "unit": "W", "category": "power_thermal"},
+    {"id": "utilization", "aliases": ["utilization", "usage", "load"], "unit": "%", "category": "monitoring"}
+  ]
+}

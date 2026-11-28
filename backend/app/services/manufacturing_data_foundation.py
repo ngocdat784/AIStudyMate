@@ -12,6 +12,7 @@ from app.services.multi_file_service import (
     CANONICAL_COLUMN_ALIASES,
     _parse_numeric,
 )
+from app.services.hardware_knowledge_base import get_knowledge_column_aliases
 
 
 _ADDITIONAL_ALIASES: dict[str, tuple[str, ...]] = {
@@ -307,6 +308,11 @@ _CANONICAL_ALIASES = {
     **CANONICAL_COLUMN_ALIASES,
     **_ADDITIONAL_ALIASES,
 }
+for _target, _aliases in get_knowledge_column_aliases().items():
+    _CANONICAL_ALIASES[_target] = (
+        *_CANONICAL_ALIASES.get(_target, ()),
+        *_aliases,
+    )
 _DOWNTIME_TO_MINUTES = {
     "seconds": 1 / 60,
     "minutes": 1.0,

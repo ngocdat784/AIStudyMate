@@ -83,15 +83,15 @@ type DataScope = {
 };
 
 type DataQuality = {
-  quality_score: number;
-  quality_status: "good" | "warning" | "poor";
+  quality_score: number | null;
+  quality_status: "good" | "warning" | "poor" | "not_assessed";
   scoring_basis: string;
   total_rows: number;
   data_rows: number;
-  valid_rows: number;
-  invalid_rows: number;
-  empty_rows: number;
-  duplicate_rows: number;
+  valid_rows: number | null;
+  invalid_rows: number | null;
+  empty_rows: number | null;
+  duplicate_rows: number | null;
   missing_values: Record<string, number>;
   invalid_values: Record<string, number>;
   negative_values: Record<string, number>;
@@ -269,7 +269,162 @@ type AvailableDomainAnalysis = {
   limitations: string[];
 };
 
+type DetectedHardwareStandard = {
+  id: string;
+  name: string;
+  full_name: string;
+  matched_aliases: string[];
+  source_sheets?: string[];
+  evidence?: Array<{
+    basis: string;
+    matched_fields: string[];
+    matched_values: string[];
+  }>;
+  priority: "P0";
+  domains: string[];
+  attributes: string[];
+  source: {
+    name: string;
+    url: string;
+  };
+};
+
+type HardwareStandardsResult = {
+  pack_id: string;
+  priority: "P0";
+  detected_standards: DetectedHardwareStandard[];
+  detected_ids: string[];
+  physical_hardware_focus: string[];
+  firmware_focus: string[];
+};
+
+type StandardsDetectionReport = Record<
+  string,
+  {
+    detected: boolean;
+    structures?: number[];
+    phases?: string[];
+  }
+>;
+
+type HardwareProfile = {
+  schema_version: string;
+  raw_columns: string[];
+  column_mapping: Record<string, string>;
+  unknown_fields: Array<{
+    source_column: string;
+    inferred_category: string | null;
+    inferred_type?: string;
+    inferred_meaning?: string;
+    source_sheet?: string;
+  }>;
+  hardware_categories: string[];
+  recognized_sensors: Array<{
+    source_column: string;
+    sensor_id: string;
+    unit: string;
+    source_sheet?: string;
+    sensor_name?: string | null;
+  }>;
+  unit_mappings: Array<{
+    source_column: string;
+    source_unit: string;
+    normalized_unit: string;
+  }>;
+  row_count: number;
+  raw_values_preserved: boolean;
+};
+
+type HardwareWorkbookIngestion = {
+  workbook_read: boolean;
+  total_sheets: number;
+  sheets_with_data: number;
+  total_data_rows: number;
+  hardware_data_rows: number;
+  source_preserved: boolean;
+  sheets: Array<{
+    name: string;
+    role: string;
+    schema_key: string | null;
+    detected_standards: string[];
+    header_row: number | null;
+    record_count: number;
+    column_count: number;
+    source_columns: Array<string | null>;
+    empty_row_count: number;
+    unknown_fields: Array<{
+      source_column: string;
+      inferred_category: string | null;
+      inferred_type?: string;
+      inferred_meaning?: string;
+    }>;
+  }>;
+};
+
+type HardwareWorkbookAnalysis = {
+  analysis_type: string;
+  raw_values_preserved: boolean;
+  categories: Record<
+    string,
+    Array<{ source_sheet: string; matched_fields: string[] }>
+  >;
+  smbios_structures: Array<{
+    source_sheet: string;
+    structure_type: string;
+    structure_names: string[];
+    record_count: number;
+    classification: string[];
+  }>;
+  sensor_readings: Array<{
+    source_sheet: string;
+    source_standard: string;
+    source_row: number;
+    sensor_name: string | null;
+    sensor_type: string | null;
+    reading: number | string;
+    raw_value: number | string;
+    source_column: string;
+    raw_unit: string | null;
+    unit: string | null;
+    device: string | null;
+    owner: string | null;
+    health: string | null;
+    status: string | null;
+    timestamp: string | null;
+    sensor_id?: string;
+    lower_critical?: number | string;
+    upper_critical?: number | string;
+  }>;
+  sheet_profiles: Array<{
+    source_sheet: string;
+    raw_columns: string[];
+    column_mapping: Record<string, string>;
+    unknown_fields: Array<{
+      source_column: string;
+      inferred_category: string | null;
+      inferred_type: string;
+      inferred_meaning: string;
+    }>;
+  }>;
+  phase1_test_report?: {
+    status: "PASS" | "FAIL";
+    passed_count: number;
+    failed_count: number;
+    total_count: number;
+    results: Array<{
+      test_id: string;
+      objective: string;
+      expected_result: string;
+      severity: string | null;
+      status: "PASS" | "FAIL";
+      evidence: string;
+    }>;
+  };
+};
+
 type HardwareResult = {
+  analysis_type?: string;
+  standards_detection?: StandardsDetectionReport;
   title: string;
   summary: string;
 
@@ -298,6 +453,10 @@ type HardwareResult = {
   unified_analysis?: UnifiedAnalysisResult;
   dataset_classification?: DatasetClassification;
   domain_analyses?: Record<string, AvailableDomainAnalysis>;
+  hardware_standards?: HardwareStandardsResult;
+  hardware_profile?: HardwareProfile;
+  ingestion?: HardwareWorkbookIngestion;
+  hardware_workbook_analysis?: HardwareWorkbookAnalysis;
   custom_prompt_response?: string;
   custom_prompt_error?: string;
   analysis_history_id?: number | null;
@@ -358,7 +517,8 @@ function getAvailableExportSections(
   }
   if (
     data.data_scope.has_defect_data ||
-    data.data_quality.quality_score >= 0
+    (typeof data.data_quality.quality_score === "number" &&
+      data.data_quality.quality_score >= 0)
   ) {
     sections.push("quality_analysis");
   }
@@ -3273,6 +3433,386 @@ export default function Home() {
               </section>
             )}
 
+            {result.hardware_standards &&
+              result.hardware_standards.detected_standards.length > 0 && (
+                <section className="dashboard-card" id="hardware-standards">
+                  <div className="dashboard-card-header">
+                    <div>
+                      <span>P0</span>
+                      <h3>Chuẩn phần cứng nhận diện</h3>
+                    </div>
+                    <p>
+                      {result.hardware_standards.detected_ids.join(" · ")}
+                    </p>
+                  </div>
+                  {result.hardware_standards.physical_hardware_focus.length > 0 && (
+                    <p>
+                      Phần cứng vật lý:{" "}
+                      {result.hardware_standards.physical_hardware_focus.join(", ")}
+                    </p>
+                  )}
+                  {result.hardware_standards.firmware_focus.length > 0 && (
+                    <p>
+                      Firmware/cấu hình:{" "}
+                      {result.hardware_standards.firmware_focus.join(", ")}
+                    </p>
+                  )}
+                  <ul>
+                    {result.hardware_standards.detected_standards.map((standard) => (
+                      <li key={standard.id}>
+                        <strong>{standard.name}</strong>{" "}
+                        — {standard.full_name}
+                        {standard.matched_aliases.length > 0 &&
+                          ` (nhận diện qua: ${standard.matched_aliases.join(", ")})`}
+                        {" · "}
+                        <a
+                          href={standard.source.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {standard.source.name}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+            {result.ingestion && result.hardware_workbook_analysis && (
+              <section className="dashboard-card" id="hardware-workbook-analysis">
+                <div className="dashboard-card-header">
+                  <div>
+                    <span>XLSX</span>
+                    <h3>Phân tích workbook phần cứng</h3>
+                  </div>
+                  <p>
+                    {result.ingestion.total_sheets} sheet ·{" "}
+                    {result.ingestion.sheets_with_data} có dữ liệu ·{" "}
+                    {result.ingestion.total_data_rows} dòng tổng ·{" "}
+                    {result.ingestion.hardware_data_rows} dòng phần cứng
+                  </p>
+                </div>
+                <p>
+                  Phân loại:{" "}
+                  {result.hardware_workbook_analysis.analysis_type} · dữ liệu
+                  gốc {result.ingestion.source_preserved ? "được giữ nguyên" : "chưa được xác nhận"}
+                </p>
+                <p>
+                  Chất lượng dữ liệu:{" "}
+                  {result.data_quality.quality_score === null
+                    ? "chưa đánh giá"
+                    : `${result.data_quality.quality_score}%`}
+                  {" · "}
+                  {result.data_quality.valid_rows ?? 0}/
+                  {result.data_quality.data_rows} dòng hợp lệ ·{" "}
+                  {result.data_quality.invalid_rows ?? 0} không hợp lệ ·{" "}
+                  {result.data_quality.duplicate_rows ?? 0} trùng ·{" "}
+                  {result.data_quality.empty_rows ?? 0} dòng trống
+                </p>
+                {result.hardware_workbook_analysis.phase1_test_report && (
+                  <div>
+                    <h4>
+                      Kiểm thử Phase 1:{" "}
+                      {result.hardware_workbook_analysis.phase1_test_report.status}
+                      {" · "}
+                      {result.hardware_workbook_analysis.phase1_test_report.passed_count}/
+                      {result.hardware_workbook_analysis.phase1_test_report.total_count} PASS
+                    </h4>
+                    <ul>
+                      {result.hardware_workbook_analysis.phase1_test_report.results.map(
+                        (test) => (
+                          <li key={test.test_id}>
+                            <strong>{test.test_id} · {test.status}</strong>
+                            {" — "}
+                            {test.objective}
+                            {test.evidence ? `: ${test.evidence}` : ""}
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  </div>
+                )}
+                <div className="table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Worksheet</th>
+                        <th>Vai trò</th>
+                        <th>Header (dòng)</th>
+                        <th>Bản ghi</th>
+                        <th>Cột gốc</th>
+                        <th>Schema / chuẩn</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.ingestion.sheets.map((sheet) => (
+                        <tr key={sheet.name}>
+                          <td>{sheet.name}</td>
+                          <td>{sheet.role}</td>
+                          <td>{sheet.header_row ?? "không có"}</td>
+                          <td>
+                            {sheet.record_count}
+                            {sheet.empty_row_count > 0 &&
+                              ` · ${sheet.empty_row_count} dòng trống`}
+                          </td>
+                          <td>{sheet.source_columns.filter(Boolean).join(", ") || "—"}</td>
+                          <td>
+                            {sheet.schema_key ?? "—"}
+                            {sheet.detected_standards.length > 0 &&
+                              ` · ${sheet.detected_standards.join(", ")}`}
+                            {sheet.unknown_fields.length > 0 &&
+                              ` · chưa ánh xạ: ${sheet.unknown_fields
+                                .map((field) => field.source_column)
+                                .join(", ")}`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {Object.entries(
+                  result.hardware_workbook_analysis.categories
+                ).map(([category, sources]) => (
+                  <div key={category}>
+                    <h4>{category}</h4>
+                    <ul>
+                      {sources.map((source, index) => (
+                        <li key={`${source.source_sheet}-${index}`}>
+                          {source.source_sheet}
+                          {source.matched_fields.length > 0 &&
+                            ` · trường: ${source.matched_fields.join(", ")}`}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+
+                {result.hardware_standards?.detected_standards.length ? (
+                  <div>
+                    <h4>Tiêu chuẩn và bằng chứng theo sheet</h4>
+                    <ul>
+                      {result.hardware_standards.detected_standards.map(
+                        (standard) => (
+                          <li key={standard.id}>
+                            <strong>{standard.name}</strong>
+                            {standard.source_sheets?.length
+                              ? ` · ${standard.source_sheets.join(", ")}`
+                              : ""}
+                            {standard.evidence?.flatMap((evidence) =>
+                              [
+                                ...evidence.matched_fields.map((field) => (
+                                  <code key={`${standard.id}-${field}`}>
+                                    {" "}{field}
+                                  </code>
+                                )),
+                                ...evidence.matched_values.map((value) => (
+                                  <code key={`${standard.id}-value-${value}`}>
+                                    {" "}{value}
+                                  </code>
+                                )),
+                              ]
+                            )}
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {result.hardware_workbook_analysis.smbios_structures.length > 0 && (
+                  <div>
+                    <h4>SMBIOS: phân loại theo structure type</h4>
+                    <ul>
+                      {result.hardware_workbook_analysis.smbios_structures.map(
+                        (structure) => (
+                          <li
+                            key={`${structure.source_sheet}-${structure.structure_type}`}
+                          >
+                            {structure.source_sheet} · Type{" "}
+                            {structure.structure_type}
+                            {structure.structure_names.length > 0 &&
+                              ` (${structure.structure_names.join(", ")})`}
+                            {" · "}
+                            {structure.classification.join(", ")} ·{" "}
+                            {structure.record_count} dòng
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  </div>
+                )}
+
+                {result.hardware_workbook_analysis.sensor_readings.length > 0 && (
+                  <div className="table-scroll">
+                    <h4>Sensor và telemetry đã chuẩn hóa</h4>
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Sheet / dòng</th>
+                          <th>Nguồn</th>
+                          <th>Sensor / loại</th>
+                          <th>Giá trị</th>
+                          <th>Thiết bị / owner</th>
+                          <th>Health / trạng thái</th>
+                          <th>Ngưỡng IPMI</th>
+                          <th>Thời điểm</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.hardware_workbook_analysis.sensor_readings.map(
+                          (sensor, index) => (
+                            <tr
+                              key={`${sensor.source_sheet}-${sensor.source_row}-${index}`}
+                            >
+                              <td>{sensor.source_sheet} · {sensor.source_row}</td>
+                              <td>{sensor.source_standard}</td>
+                              <td>
+                                {sensor.sensor_name ?? "—"}
+                                {sensor.sensor_type ? ` · ${sensor.sensor_type}` : ""}
+                                {sensor.sensor_id ? ` · ${sensor.sensor_id}` : ""}
+                              </td>
+                              <td>
+                                {String(sensor.reading)}
+                                {sensor.unit ? ` ${sensor.unit}` : ""}
+                                {" · raw: "}
+                                {String(sensor.raw_value)}
+                                {sensor.raw_unit ? ` ${sensor.raw_unit}` : ""}
+                              </td>
+                              <td>
+                                {[sensor.device, sensor.owner]
+                                  .filter(Boolean)
+                                  .join(" / ") || "—"}
+                              </td>
+                              <td>
+                                {[sensor.health, sensor.status].filter(Boolean).join(" / ") || "—"}
+                              </td>
+                              <td>
+                                {sensor.lower_critical ?? "—"} –{" "}
+                                {sensor.upper_critical ?? "—"}
+                              </td>
+                              <td>{sensor.timestamp ?? "—"}</td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {result.hardware_workbook_analysis.sheet_profiles.map(
+                  (profile) => (
+                    <details key={profile.source_sheet}>
+                      <summary>
+                        Mapping và trường chưa biết · {profile.source_sheet}
+                      </summary>
+                      {Object.entries(profile.column_mapping).length > 0 && (
+                        <ul>
+                          {Object.entries(profile.column_mapping).map(
+                            ([source, target]) => (
+                              <li key={`${profile.source_sheet}-${source}`}>
+                                <code>{source}</code> → <code>{target}</code>
+                              </li>
+                            )
+                          )}
+                        </ul>
+                      )}
+                      {profile.unknown_fields.length > 0 && (
+                        <p>
+                          Giữ nguyên, chưa ánh xạ:{" "}
+                          {profile.unknown_fields
+                            .map((field) => field.source_column)
+                            .join(", ")}
+                        </p>
+                      )}
+                    </details>
+                  )
+                )}
+              </section>
+            )}
+
+            {result.hardware_profile && (
+              <section className="dashboard-card" id="hardware-knowledge-profile">
+                <div className="dashboard-card-header">
+                  <div>
+                    <span>KB</span>
+                    <h3>Cấu trúc dữ liệu phần cứng</h3>
+                  </div>
+                  <p>
+                    {result.hardware_profile.row_count} dòng · schema{" "}
+                    {result.hardware_profile.schema_version}
+                  </p>
+                </div>
+                {result.hardware_profile.hardware_categories.length > 0 && (
+                  <p>
+                    Nhóm nhận diện:{" "}
+                    {result.hardware_profile.hardware_categories.join(", ")}
+                  </p>
+                )}
+                {result.hardware_profile.unit_mappings.length > 0 && (
+                  <p>
+                    Đơn vị chuẩn hóa nhãn:{" "}
+                    {result.hardware_profile.unit_mappings
+                      .map(
+                        (unit) =>
+                          `${unit.source_column}: ${unit.source_unit} → ${unit.normalized_unit}`
+                      )
+                      .join("; ")}
+                  </p>
+                )}
+                {result.hardware_profile.recognized_sensors.length > 0 && (
+                  <p>
+                    Cảm biến nhận diện:{" "}
+                    {result.hardware_profile.recognized_sensors
+                      .map(
+                        (sensor) =>
+                          `${sensor.source_sheet ? `${sensor.source_sheet} · ` : ""}${sensor.sensor_name ?? sensor.source_column} → ${sensor.sensor_id} (${sensor.unit})`
+                      )
+                      .join("; ")}
+                  </p>
+                )}
+                <p>
+                  Cột gốc được giữ nguyên:{" "}
+                  {result.hardware_profile.raw_columns.join(", ") || "không có"}
+                </p>
+                {Object.keys(result.hardware_profile.column_mapping).length > 0 && (
+                  <>
+                    <h4>Ánh xạ trường đã biết</h4>
+                    <ul>
+                      {Object.entries(result.hardware_profile.column_mapping).map(
+                        ([source, target]) => (
+                          <li key={source}>
+                            <code>{source}</code> → <code>{target}</code>
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  </>
+                )}
+                {result.hardware_profile.unknown_fields.length > 0 && (
+                  <>
+                    <h4>Trường chưa có trong từ điển (được giữ lại)</h4>
+                    <ul>
+                      {result.hardware_profile.unknown_fields.map((field) => (
+                        <li key={field.source_column}>
+                          <code>{field.source_column}</code>
+                          {field.inferred_category
+                            ? ` — nhóm gợi ý: ${field.inferred_category}`
+                            : " — chưa xác định nhóm"}
+                          {field.inferred_type
+                            ? ` · kiểu dữ liệu: ${field.inferred_type}`
+                            : ""}
+                          {field.inferred_meaning
+                            ? ` · ${field.inferred_meaning}`
+                            : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </section>
+            )}
+
             {result.dataset_classification && (
               <section className="dashboard-card" id="dataset-classification">
                 <div className="dashboard-card-header">
@@ -5109,10 +5649,7 @@ function DataQualityCard({
   dataProcessing: DataProcessing;
   hasDefectTypeData: boolean;
 }) {
-  const score =
-    Number(
-      dataQuality?.quality_score ?? 0
-    );
+  const score = dataQuality.quality_score;
 
   const qualityStatuses = {
     good: {
@@ -5127,16 +5664,21 @@ function DataQualityCard({
       label: "Kém",
       className: "quality-poor",
     },
+    not_assessed: {
+      label: "Chưa đánh giá",
+      className: "quality-review",
+    },
   };
 
   const qualityStatus = qualityStatuses[dataQuality.quality_status];
 
   const totalIssues =
-    dataQuality.invalid_rows +
-    dataQuality.empty_rows;
+    (dataQuality.invalid_rows ?? 0) +
+    (dataQuality.empty_rows ?? 0);
 
   const hasProblems =
     totalIssues > 0 ||
+    score === null ||
     Object.keys(
       dataQuality.missing_values || {}
     ).length > 0 ||
@@ -5183,13 +5725,13 @@ function DataQualityCard({
     }
   );
 
-  if (dataQuality.empty_rows > 0) {
+  if ((dataQuality.empty_rows ?? 0) > 0) {
     issueMessages.push(
       `Có ${dataQuality.empty_rows} dòng trống.`
     );
   }
 
-  if (dataQuality.duplicate_rows > 0) {
+  if ((dataQuality.duplicate_rows ?? 0) > 0) {
     issueMessages.push(
       `Có ${dataQuality.duplicate_rows} dòng trùng lặp; các lần xuất hiện trùng sau bản ghi đầu đã được tính trong nhóm dòng không hợp lệ.`
     );
@@ -5205,6 +5747,12 @@ function DataQualityCard({
       )}.`
     );
   }
+  if (score === null) {
+    issueMessages.push(
+      "Chưa đánh giá tính đầy đủ, tính hợp lệ và bản ghi trùng của dữ liệu."
+    );
+  }
+  issueMessages.push(...(dataQuality.warnings ?? []));
 
   return (
     <section
@@ -5238,10 +5786,12 @@ function DataQualityCard({
         <div className="quality-score">
 
           <div className="quality-score-number">
-            {score.toLocaleString("vi-VN", {
-              minimumFractionDigits: 1,
-              maximumFractionDigits: 1,
-            })}
+            {score === null
+              ? "—"
+              : score.toLocaleString("vi-VN", {
+                  minimumFractionDigits: 1,
+                  maximumFractionDigits: 1,
+                })}
           </div>
 
           <div className="quality-score-total">
@@ -5257,7 +5807,9 @@ function DataQualityCard({
           </strong>
 
           <span>
-            {hasProblems
+            {score === null
+              ? "Chưa chấm điểm chất lượng dữ liệu"
+              : hasProblems
               ? "Dựa trên quy tắc kiểm tra chất lượng dữ liệu đầu vào"
               : "Không phát hiện vấn đề theo các quy tắc kiểm tra"}
           </span>
@@ -5427,7 +5979,7 @@ function QualityStat({
   value,
 }: {
   label: string;
-  value: number;
+  value: number | null;
 }) {
   return (
     <div className="quality-stat">
@@ -5437,9 +5989,7 @@ function QualityStat({
       </span>
 
       <strong>
-        {value.toLocaleString(
-          "vi-VN"
-        )}
+        {value === null ? "Chưa đánh giá" : value.toLocaleString("vi-VN")}
       </strong>
 
     </div>
