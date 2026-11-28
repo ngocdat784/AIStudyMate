@@ -27,6 +27,16 @@ database. When using Railway, data goes to Railway's database. A Cloudflare
 tunnel to the local frontend still uses the local target because Next.js
 forwards API requests server-side.
 
+## Railway backend build
+
+The backend Dockerfile copies both `backend/` and the repository-root
+`knowledge_base/` directory. In the Railway backend service, keep the Root
+Directory at `/` and set the Dockerfile path to `/backend/Dockerfile`
+(builder: Dockerfile). Do not set the Root Directory to `/backend`; doing so
+removes the root knowledge base from the Docker build context. Confirm the
+deployment is using a commit that includes the tracked `knowledge_base/`
+directory.
+
 ## Local deployment with Docker Compose
 
 See the [backend deployment guide](./backend/README.md#13f-docker-deployment-and-environments)
